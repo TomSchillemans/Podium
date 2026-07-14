@@ -133,6 +133,11 @@ pub fn run() {
             state
                 .orchestrator
                 .set_todos_path(app.path().app_data_dir()?.join("todos.json"));
+            // Per-project scratchpads persist the same way, keyed by project
+            // root.
+            state
+                .orchestrator
+                .set_scratchpads_path(app.path().app_data_dir()?.join("scratchpads.json"));
             // Global agent settings (command override + default args per
             // adapter, merge mode) persist in the app data dir too.
             state

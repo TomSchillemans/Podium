@@ -15,12 +15,13 @@ use crate::config::AgentsConfig;
 use crate::error::{CoreError, CoreResult};
 use crate::events::{EventBus, PodiumEvent};
 use crate::ids::{CommentId, LinkId, TodoId};
-use crate::ids::{ProcessId, ProjectId};
+use crate::ids::{ProcessId, ProjectId, ScratchpadId};
 use crate::process::pty::{ExitCallback, PtyProcess, TermChunk};
 use crate::process::scrollback::ScrollbackBuffer;
 use crate::process::supervisor::{RestartState, SupervisorConfig};
 use crate::process::{ProcessInfo, ProcessKind, ProcessSpec, ProcessStatus, RestartPolicy};
 use crate::project::{self, ConfiguredProcess};
+use crate::scratchpad::{ScratchpadInfo, ScratchpadStore};
 use crate::todo::{AssignedAgent, TodoInfo, TodoStore};
 
 /// Capacity (in chunks) of each process's raw-output broadcast channel.
@@ -144,6 +145,8 @@ pub struct Orchestrator {
     mcp: Mutex<Option<McpConnectInfo>>,
     /// Per-project to-do lists, keyed by project root (survives restarts).
     todos: TodoStore,
+    /// Per-project scratchpads, keyed by project root (survives restarts).
+    scratchpads: ScratchpadStore,
     /// Global, cross-project agent settings (command override + default args
     /// per adapter, plus the merge mode).
     agent_settings: AgentSettingsStore,
@@ -169,6 +172,7 @@ impl Orchestrator {
             adapters: AdapterRegistry::default(),
             mcp: Mutex::new(None),
             todos: TodoStore::new(),
+            scratchpads: ScratchpadStore::new(),
             agent_settings: AgentSettingsStore::new(),
         }
     }
@@ -189,6 +193,12 @@ impl Orchestrator {
     /// Until this is called, to-dos are held in memory only.
     pub fn set_todos_path(&self, path: PathBuf) {
         self.todos.set_path(path);
+    }
+
+    /// Point the scratchpad store at its backing file (app data dir) and
+    /// load it. Until this is called, scratchpads are held in memory only.
+    pub fn set_scratchpads_path(&self, path: PathBuf) {
+        self.scratchpads.set_path(path);
     }
 
     /// Point the global agent settings at their backing file (app data dir)
@@ -665,6 +675,70 @@ impl Orchestrator {
             .remove_link(project_id, &root, todo_id, link_id)?;
         self.events
             .publish(PodiumEvent::TodosChanged { project_id });
+        Ok(info)
+    }
+
+    /// List a project's active (non-archived) scratchpads.
+    pub fn list_scratchpads(&self, project_id: ProjectId) -> CoreResult<Vec<ScratchpadInfo>> {
+        let root = self.project_root(project_id)?;
+        Ok(self.scratchpads.list(project_id, &root))
+    }
+
+    /// Create a new scratchpad in a project (auto-generated timestamp title,
+    /// empty content).
+    pub fn add_scratchpad(
+        &self,
+        project_id: ProjectId,
+        updated_by: &str,
+    ) -> CoreResult<ScratchpadInfo> {
+        let root = self.project_root(project_id)?;
+        let info = self.scratchpads.add(project_id, &root, updated_by)?;
+        self.events
+            .publish(PodiumEvent::ScratchpadsChanged { project_id });
+        Ok(info)
+    }
+
+    /// One scratchpad by id, if it exists.
+    pub fn get_scratchpad(
+        &self,
+        project_id: ProjectId,
+        id: ScratchpadId,
+    ) -> CoreResult<Option<ScratchpadInfo>> {
+        let root = self.project_root(project_id)?;
+        Ok(self.scratchpads.get(project_id, &root, id))
+    }
+
+    /// Replace a scratchpad's content (bumps its version).
+    pub fn update_scratchpad_content(
+        &self,
+        project_id: ProjectId,
+        id: ScratchpadId,
+        content: &str,
+        updated_by: &str,
+    ) -> CoreResult<ScratchpadInfo> {
+        let root = self.project_root(project_id)?;
+        let info = self
+            .scratchpads
+            .update_content(project_id, &root, id, content, updated_by)?;
+        self.events
+            .publish(PodiumEvent::ScratchpadsChanged { project_id });
+        Ok(info)
+    }
+
+    /// Revise a scratchpad's title (blank falls back to a timestamp title).
+    pub fn update_scratchpad_title(
+        &self,
+        project_id: ProjectId,
+        id: ScratchpadId,
+        title: &str,
+        updated_by: &str,
+    ) -> CoreResult<ScratchpadInfo> {
+        let root = self.project_root(project_id)?;
+        let info = self
+            .scratchpads
+            .update_title(project_id, &root, id, title, updated_by)?;
+        self.events
+            .publish(PodiumEvent::ScratchpadsChanged { project_id });
         Ok(info)
     }
 
@@ -1719,5 +1793,57 @@ mod tests {
         orch.close_project(ida).await.unwrap();
         let ids: Vec<_> = orch.list_projects().into_iter().map(|p| p.id).collect();
         assert_eq!(ids, vec![idb]);
+    }
+
+    #[tokio::test]
+    async fn add_scratchpad_publishes_scratchpads_changed_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch = Orchestrator::new();
+        let project_id = orch.open_project(dir.path().to_path_buf()).await.unwrap();
+        let mut rx = orch.subscribe_events();
+
+        let added = orch.add_scratchpad(project_id, "User").unwrap();
+        assert!(added.title.ends_with("Scratchpad"));
+
+        let event = rx.try_recv().expect("event published");
+        assert!(matches!(
+            event,
+            PodiumEvent::ScratchpadsChanged { project_id: pid } if pid == project_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn update_scratchpad_content_publishes_scratchpads_changed_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch = Orchestrator::new();
+        let project_id = orch.open_project(dir.path().to_path_buf()).await.unwrap();
+        let added = orch.add_scratchpad(project_id, "User").unwrap();
+        let mut rx = orch.subscribe_events();
+
+        let updated = orch
+            .update_scratchpad_content(project_id, added.id, "hello", "claude")
+            .unwrap();
+        assert_eq!(updated.content, "hello");
+        assert_eq!(updated.version, 2);
+
+        let event = rx.try_recv().expect("event published");
+        assert!(matches!(
+            event,
+            PodiumEvent::ScratchpadsChanged { project_id: pid } if pid == project_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn list_scratchpads_does_not_publish_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch = Orchestrator::new();
+        let project_id = orch.open_project(dir.path().to_path_buf()).await.unwrap();
+        orch.add_scratchpad(project_id, "User").unwrap();
+        let mut rx = orch.subscribe_events();
+
+        let listed = orch.list_scratchpads(project_id).unwrap();
+        assert_eq!(listed.len(), 1);
+
+        assert!(rx.try_recv().is_err(), "list must not publish an event");
     }
 }
