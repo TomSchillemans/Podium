@@ -41,6 +41,7 @@ import { useThemeStore } from "./state/themeStore";
 import { useTodoStore } from "./state/todoStore";
 import { CloseWarningModal } from "./components/CloseWarningModal";
 import { LogoMark } from "./components/LogoMark";
+import { ScratchpadDetailPane } from "./components/ScratchpadDetailPane";
 import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar } from "./components/Sidebar";
 import { TerminalPane } from "./components/TerminalPane";
@@ -58,6 +59,7 @@ export default function App() {
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
   const setSidebarWidth = useLayoutStore((s) => s.setSidebarWidth);
   const openTodo = useLayoutStore((s) => s.openTodo);
+  const openScratchpad = useLayoutStore((s) => s.openScratchpad);
 
   const activeProcess = useProcessStore(
     (s) => s.processes.find((p) => p.id === s.activeProcessId) ?? null,
@@ -235,7 +237,13 @@ export default function App() {
           aria-label="Resize sidebar"
         />
         <main className={styles.work}>
-          {openTodo ? (
+          {openScratchpad ? (
+            <ScratchpadDetailPane
+              key={openScratchpad.scratchpadId}
+              projectId={openScratchpad.projectId}
+              scratchpadId={openScratchpad.scratchpadId}
+            />
+          ) : openTodo ? (
             <TodoDetailPane
               key={openTodo.todoId}
               projectId={openTodo.projectId}
