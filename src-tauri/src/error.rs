@@ -64,6 +64,7 @@ impl From<CoreError> for IpcError {
             CoreError::TodoNotFound => "todoNotFound",
             CoreError::CommentNotFound => "commentNotFound",
             CoreError::LinkNotFound => "linkNotFound",
+            CoreError::ScratchpadNotFound => "scratchpadNotFound",
             CoreError::ProcessAlreadyRunning => "processAlreadyRunning",
             CoreError::ProcessNotRunning => "processNotRunning",
             CoreError::AgentLimitReached => "agentLimitReached",

@@ -23,6 +23,9 @@ pub enum CoreError {
     #[error("link not found")]
     LinkNotFound,
 
+    #[error("scratchpad not found")]
+    ScratchpadNotFound,
+
     #[error("process is already running")]
     ProcessAlreadyRunning,
 
