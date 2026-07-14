@@ -21,6 +21,7 @@ import {
   onProjectClosed,
   onProjectOpened,
   onProjectUpdated,
+  onScratchpadsChanged,
   onTodosChanged,
   onWindowCloseRequested,
 } from "./ipc/events";
@@ -34,6 +35,7 @@ import { startAgentActivityMonitor } from "./state/agentActivityStore";
 import { useLayoutStore } from "./state/layoutStore";
 import { useProcessStore } from "./state/processStore";
 import { useProjectStore } from "./state/projectStore";
+import { useScratchpadStore } from "./state/scratchpadStore";
 import { useSettingsStore } from "./state/settingsStore";
 import { useThemeStore } from "./state/themeStore";
 import { useTodoStore } from "./state/todoStore";
@@ -91,8 +93,12 @@ export default function App() {
         void useProjectStore.getState().refresh();
         void useProcessStore.getState().refresh();
         useTodoStore.getState().dropProject(e.projectId);
+        useScratchpadStore.getState().dropProject(e.projectId);
       }),
       onTodosChanged((e) => void useTodoStore.getState().refresh(e.projectId)),
+      onScratchpadsChanged(
+        (e) => void useScratchpadStore.getState().refresh(e.projectId),
+      ),
       // The backend blocked a quit because agents/terminals are still
       // running — surface the warning so the user can confirm or cancel.
       onWindowCloseRequested(() => setCloseWarnOpen(true)),

@@ -24,6 +24,8 @@ import type {
   ProjectId,
   ProjectInfo,
   RecentProject,
+  ScratchpadId,
+  ScratchpadInfo,
   TermEvent,
   TodoId,
   TodoInfo,
@@ -379,6 +381,40 @@ export function todoUnassign(
   todoId: TodoId,
 ): Promise<TodoInfo> {
   return invoke("todo_unassign", { projectId, todoId });
+}
+
+// ---------------------------------------------------------------------------
+// Scratchpads
+// ---------------------------------------------------------------------------
+
+/** List a project's active (non-archived) scratchpads. */
+export function scratchpadList(
+  projectId: ProjectId,
+): Promise<ScratchpadInfo[]> {
+  return invoke("scratchpad_list", { projectId });
+}
+
+/** Create a new scratchpad (auto-generated timestamp title, empty content). */
+export function scratchpadAdd(projectId: ProjectId): Promise<ScratchpadInfo> {
+  return invoke("scratchpad_add", { projectId });
+}
+
+/** Replace a scratchpad's content (bumps its version). */
+export function scratchpadUpdateContent(
+  projectId: ProjectId,
+  id: ScratchpadId,
+  content: string,
+): Promise<ScratchpadInfo> {
+  return invoke("scratchpad_update_content", { projectId, id, content });
+}
+
+/** Revise a scratchpad's title (blank falls back to a timestamp title). */
+export function scratchpadUpdateTitle(
+  projectId: ProjectId,
+  id: ScratchpadId,
+  title: string,
+): Promise<ScratchpadInfo> {
+  return invoke("scratchpad_update_title", { projectId, id, title });
 }
 
 // ---------------------------------------------------------------------------
