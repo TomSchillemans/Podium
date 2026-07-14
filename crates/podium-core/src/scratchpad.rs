@@ -102,11 +102,13 @@ impl ScratchpadStore {
         }
     }
 
-    /// Point the store at its backing file. Persistence lands in a later
-    /// change; for now this just records the path.
+    /// Point the store at its backing file and load whatever is there. Any
+    /// in-memory scratchpads accumulated before this call are replaced.
     pub fn set_path(&self, path: PathBuf) {
+        let scratchpads = load(&path);
         let mut inner = self.inner.lock().expect(LOCK_POISONED);
         inner.path = Some(path);
+        inner.scratchpads = scratchpads;
     }
 
     /// The active (non-archived) scratchpads for a project.
@@ -150,6 +152,7 @@ impl ScratchpadStore {
             .entry(key(root))
             .or_default()
             .push(scratchpad.clone());
+        save(&inner)?;
         Ok(scratchpad.info(project_id))
     }
 
@@ -188,7 +191,9 @@ impl ScratchpadStore {
         scratchpad.version += 1;
         scratchpad.updated_at = Utc::now();
         scratchpad.updated_by = updated_by.to_string();
-        Ok(scratchpad.info(project_id))
+        let info = scratchpad.info(project_id);
+        save(&inner)?;
+        Ok(info)
     }
 
     /// Revise a scratchpad's title. A blank title falls back to a
@@ -215,7 +220,9 @@ impl ScratchpadStore {
         };
         scratchpad.updated_at = Utc::now();
         scratchpad.updated_by = updated_by.to_string();
-        Ok(scratchpad.info(project_id))
+        let info = scratchpad.info(project_id);
+        save(&inner)?;
+        Ok(info)
     }
 }
 
@@ -226,6 +233,35 @@ fn timestamp_title(at: DateTime<Utc>) -> String {
 
 fn key(root: &Path) -> String {
     root.to_string_lossy().into_owned()
+}
+
+/// Read the map from disk; a missing or corrupt file is an empty store.
+fn load(path: &Path) -> ScratchpadMap {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return ScratchpadMap::new();
+    };
+    serde_json::from_str(&raw).unwrap_or_else(|e| {
+        tracing::warn!("scratchpads file is corrupt, starting fresh: {e}");
+        ScratchpadMap::new()
+    })
+}
+
+/// Atomically persist the map: write a temp file, then rename it over the
+/// old one so a crash mid-write can never leave a torn file. A store without
+/// a path (in-memory) is a no-op.
+fn save(inner: &Inner) -> CoreResult<()> {
+    let Some(path) = &inner.path else {
+        return Ok(());
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let json = serde_json::to_string_pretty(&inner.scratchpads)
+        .map_err(|e| CoreError::InvalidInput(format!("failed to encode scratchpads: {e}")))?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -307,5 +343,64 @@ mod tests {
         let added = store.add(project, &root, "User").unwrap();
         assert_eq!(store.get(project, &root, added.id).unwrap().id, added.id);
         assert!(store.get(project, &root, ScratchpadId::new()).is_none());
+    }
+
+    #[test]
+    fn save_and_load_round_trips_via_temp_file_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("scratchpads.json");
+        let (project, root) = ids();
+
+        let store = ScratchpadStore::new();
+        store.set_path(file.clone());
+        let added = store.add(project, &root, "User").unwrap();
+        store
+            .update_content(project, &root, added.id, "survive a restart", "User")
+            .unwrap();
+
+        let reloaded = ScratchpadStore::new();
+        reloaded.set_path(file);
+        let listed = reloaded.list(project, &root);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].content, "survive a restart");
+        assert_eq!(listed[0].version, 2);
+    }
+
+    #[test]
+    fn missing_file_loads_empty_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("scratchpads.json");
+
+        let store = ScratchpadStore::new();
+        store.set_path(file);
+        let (project, root) = ids();
+        assert!(store.list(project, &root).is_empty());
+    }
+
+    #[test]
+    fn corrupt_file_logs_warning_and_loads_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("scratchpads.json");
+        std::fs::write(&file, "not json").unwrap();
+
+        let store = ScratchpadStore::new();
+        store.set_path(file);
+        let (project, root) = ids();
+        assert!(store.list(project, &root).is_empty());
+    }
+
+    #[test]
+    fn list_returns_only_scratchpads_for_given_project_root() {
+        let store = ScratchpadStore::new();
+        let project = ProjectId::new();
+        let root_a = PathBuf::from("/tmp/fixture-c");
+        let root_b = PathBuf::from("/tmp/fixture-d");
+
+        store.add(project, &root_a, "User").unwrap();
+        store.add(project, &root_a, "User").unwrap();
+        store.add(project, &root_b, "User").unwrap();
+
+        assert_eq!(store.list(project, &root_a).len(), 2);
+        assert_eq!(store.list(project, &root_b).len(), 1);
     }
 }
