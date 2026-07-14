@@ -204,6 +204,10 @@ pub fn run() {
             commands::todo::todo_remove_link,
             commands::todo::todo_remove,
             commands::todo::todo_unassign,
+            commands::scratchpad::scratchpad_list,
+            commands::scratchpad::scratchpad_add,
+            commands::scratchpad::scratchpad_update_content,
+            commands::scratchpad::scratchpad_update_title,
             commands::window::window_confirm_close,
         ])
         .build(tauri::generate_context!())
