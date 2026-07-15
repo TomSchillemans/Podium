@@ -68,7 +68,11 @@ export function useHeadings(editor: Editor | null): Heading[] {
       setHeadings([]);
       return;
     }
-    const sync = ({ transaction }: { transaction: { docChanged: boolean } }) => {
+    const sync = ({
+      transaction,
+    }: {
+      transaction: { docChanged: boolean };
+    }) => {
       if (!transaction.docChanged) return;
       setHeadings(extractHeadings(editor));
     };

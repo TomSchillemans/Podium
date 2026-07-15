@@ -379,7 +379,10 @@ export function ScratchpadDetailPane({
             onEditorReady={setEditor}
           />
         </div>
-        <ScratchpadTOC headings={headings} onSelectHeading={handleSelectHeading} />
+        <ScratchpadTOC
+          headings={headings}
+          onSelectHeading={handleSelectHeading}
+        />
       </div>
 
       <footer className={styles.footer}>
