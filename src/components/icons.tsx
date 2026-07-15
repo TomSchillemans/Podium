@@ -16,12 +16,26 @@
 import {
   Archive,
   ArchiveRestore,
+  Bold,
   Bot,
+  Code,
+  Code2,
+  Heading2,
+  Heading3,
+  Italic,
   Link,
+  Link2,
+  List,
+  ListChecks,
+  ListOrdered,
   ListTodo,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   NotebookPen,
+  Quote,
   SquareTerminal,
+  Strikethrough,
   Play,
   Square,
   RotateCw,
@@ -91,6 +105,23 @@ export const EditIcon = icon(Pencil, { size: 13 });
 export const TagIcon = icon(Tag, { size: 12 });
 export const DeleteIcon = icon(Trash2, { size: 13 });
 export const GripIcon = icon(GripVertical, { size: 14 });
+
+// Scratchpad formatting toolbar (Tiptap commands) + fullscreen toggle.
+export const BoldIcon = icon(Bold, { size: 15 });
+export const ItalicIcon = icon(Italic, { size: 15 });
+export const StrikethroughIcon = icon(Strikethrough, { size: 15 });
+export const InlineCodeIcon = icon(Code, { size: 15 });
+export const LinkFormatIcon = icon(Link2, { size: 15 });
+export const Heading2Icon = icon(Heading2, { size: 15 });
+export const Heading3Icon = icon(Heading3, { size: 15 });
+export const BulletListIcon = icon(List, { size: 15 });
+export const OrderedListIcon = icon(ListOrdered, { size: 15 });
+export const ChecklistIcon = icon(ListChecks, { size: 15 });
+export const BlockquoteIcon = icon(Quote, { size: 15 });
+export const CodeBlockIcon = icon(Code2, { size: 15 });
+export const HorizontalRuleIcon = icon(Minus, { size: 15 });
+export const ExpandIcon = icon(Maximize2, { size: 14 });
+export const CollapseIcon = icon(Minimize2, { size: 14 });
 
 // Theme glyphs (dark / light / system).
 export const SunIcon = icon(Sun);
