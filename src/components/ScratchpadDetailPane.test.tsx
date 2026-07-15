@@ -298,12 +298,25 @@ describe("ScratchpadDetailPane", () => {
     expect(removeTag).toHaveBeenCalledWith(PROJECT, SCRATCHPAD, "urgent");
   });
 
-  it("shows a conflict banner and reload discards the local edit", async () => {
+  it("conflict banner freezes the editor on the user's edit until they decide, and reload adopts the server version", async () => {
     vi.useFakeTimers();
+    const serverVersion = scratchpad({
+      content: "agent's version",
+      updatedAt: "2024-04-03T12:05:00Z",
+      version: 2,
+    });
     const updateContent = vi.fn(() =>
       Promise.resolve({ conflict: true as const }),
     );
-    const refresh = vi.fn(() => Promise.resolve());
+    // Simulate the conflict handler's refresh() pulling in the concurrent
+    // agent edit — this is the value the adoption effect must NOT swap the
+    // editor to while the banner is up.
+    const refresh = vi.fn(() => {
+      useScratchpadStore.setState({
+        scratchpadsByProject: { [PROJECT]: [serverVersion] },
+      });
+      return Promise.resolve();
+    });
     seed();
     useScratchpadStore.setState({ updateContent, refresh });
     render(
@@ -322,6 +335,12 @@ describe("ScratchpadDetailPane", () => {
 
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(refresh).toHaveBeenCalledWith(PROJECT);
+    // The editor still shows the user's edit, not the server's — the banner
+    // must not silently discard it before the user decides.
+    expect(
+      (screen.getByLabelText("Scratchpad content") as HTMLTextAreaElement)
+        .value,
+    ).toBe("my stale edit");
 
     fireEvent.click(screen.getByText("Reload"));
 
@@ -329,18 +348,28 @@ describe("ScratchpadDetailPane", () => {
     expect(
       (screen.getByLabelText("Scratchpad content") as HTMLTextAreaElement)
         .value,
-    ).toBe("");
+    ).toBe("agent's version");
   });
 
-  it("force save retries the update with the current updatedAt", async () => {
+  it("force save keeps the user's edit visible and persists it with the fresh updatedAt", async () => {
     vi.useFakeTimers();
+    const serverVersion = scratchpad({
+      content: "agent's version",
+      updatedAt: "2024-04-03T12:05:00Z",
+      version: 2,
+    });
     let calls = 0;
-    const updateContent = vi.fn(() => {
+    const updateContent = vi.fn((_p, _id, content: string) => {
       calls += 1;
       if (calls === 1) return Promise.resolve({ conflict: true as const });
-      return Promise.resolve(scratchpad({ content: "my edit", version: 2 }));
+      return Promise.resolve(scratchpad({ content, version: 3 }));
     });
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn(() => {
+      useScratchpadStore.setState({
+        scratchpadsByProject: { [PROJECT]: [serverVersion] },
+      });
+      return Promise.resolve();
+    });
     seed();
     useScratchpadStore.setState({ updateContent, refresh });
     render(
@@ -356,6 +385,11 @@ describe("ScratchpadDetailPane", () => {
       await Promise.resolve();
     });
     expect(screen.getByRole("alert")).toBeInTheDocument();
+    // Still the user's edit, not the server's, while the banner is up.
+    expect(
+      (screen.getByLabelText("Scratchpad content") as HTMLTextAreaElement)
+        .value,
+    ).toBe("my edit");
 
     fireEvent.click(screen.getByText("Force save"));
     await act(async () => {
@@ -363,12 +397,19 @@ describe("ScratchpadDetailPane", () => {
       await Promise.resolve();
     });
 
+    // Retried with the fresh (refreshed) updatedAt, not the original stale one.
     expect(updateContent).toHaveBeenLastCalledWith(
       PROJECT,
       SCRATCHPAD,
       "my edit",
-      "2024-04-03T12:00:00Z",
+      "2024-04-03T12:05:00Z",
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // The user's edit stays visible — force save doesn't get swapped back to
+    // the server's version now that it's the persisted one.
+    expect(
+      (screen.getByLabelText("Scratchpad content") as HTMLTextAreaElement)
+        .value,
+    ).toBe("my edit");
   });
 });

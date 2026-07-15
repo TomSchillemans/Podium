@@ -85,26 +85,30 @@ export function ScratchpadDetailPane({
   existsRef.current = scratchpad !== undefined;
 
   // Adopt an external title change (e.g. an agent rename) only when the
-  // field has no unsaved local edit pending.
+  // field has no unsaved local edit pending. Frozen while a conflict banner
+  // is up: the `refresh()` the conflict handler triggers pulls in the
+  // server's title, but adopting it here would silently overwrite what the
+  // user is deciding about — "Reload"/"Force save" apply it explicitly.
   useEffect(() => {
-    if (scratchpad === undefined) return;
+    if (scratchpad === undefined || conflict) return;
     if (scratchpad.title === savedTitleRef.current) return;
     setTitle((current) =>
       current === savedTitleRef.current ? scratchpad.title : current,
     );
     savedTitleRef.current = scratchpad.title;
-  }, [scratchpad]);
+  }, [scratchpad, conflict]);
 
   // Same for content — an agent's edit is adopted only while the user isn't
   // mid-typing an unsaved change; otherwise it arrives on the next autosave.
+  // Also frozen while a conflict banner is up, for the same reason as title.
   useEffect(() => {
-    if (scratchpad === undefined) return;
+    if (scratchpad === undefined || conflict) return;
     if (scratchpad.content === savedContentRef.current) return;
     setContent((current) =>
       current === savedContentRef.current ? scratchpad.content : current,
     );
     savedContentRef.current = scratchpad.content;
-  }, [scratchpad]);
+  }, [scratchpad, conflict]);
 
   // Advance the conflict-detection base only while no save is in flight —
   // if a debounced autosave is pending, this pane's local edit hasn't been

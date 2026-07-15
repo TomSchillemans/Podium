@@ -60,7 +60,7 @@ extracted into a standalone template:
   activity ("working…"/idle) heuristic, a to-do detail view that fills the
   work area (description edit + comment thread, mutually exclusive with the
   focused process), settings + theme (dark/light) + toasts, Zustand stores,
-  typed IPC wrappers over all 28 commands.
+  typed IPC wrappers over all 51 commands.
 - ✅ CI (`.github/workflows/ci.yml`): one macOS job — rustfmt, clippy
   `-D warnings`, `cargo test --workspace` (real PTYs), typecheck, ESLint,
   Vitest, production build.
