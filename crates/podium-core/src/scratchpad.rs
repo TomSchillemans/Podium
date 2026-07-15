@@ -26,10 +26,11 @@ pub struct ScratchpadInfo {
     pub project_id: ProjectId,
     pub title: String,
     pub content: String,
-    /// Whether the scratchpad is archived. Always `false` for now — Phase 4
-    /// adds real archiving, but the field is included now so the struct
-    /// shape stays stable.
+    /// Whether the scratchpad is archived (hidden from the main list, shown
+    /// in the Archive view).
     pub archived: bool,
+    /// When the scratchpad was archived (`None` while active).
+    pub archived_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Who last touched the scratchpad's content: `"User"` or an agent name
@@ -37,6 +38,8 @@ pub struct ScratchpadInfo {
     pub updated_by: String,
     /// Increments on every content update, starting at 1.
     pub version: u32,
+    /// Free-text tags, addable by the user and by agents over MCP.
+    pub tags: Vec<String>,
 }
 
 /// One scratchpad as persisted on disk; the project association is the map
@@ -50,12 +53,16 @@ struct StoredScratchpad {
     content: String,
     #[serde(default)]
     archived: bool,
+    #[serde(default)]
+    archived_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     #[serde(default)]
     updated_by: String,
     #[serde(default = "default_version")]
     version: u32,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 fn default_version() -> u32 {
@@ -70,10 +77,12 @@ impl StoredScratchpad {
             title: self.title.clone(),
             content: self.content.clone(),
             archived: self.archived,
+            archived_at: self.archived_at,
             created_at: self.created_at,
             updated_at: self.updated_at,
             updated_by: self.updated_by.clone(),
             version: self.version,
+            tags: self.tags.clone(),
         }
     }
 }
@@ -127,6 +136,24 @@ impl ScratchpadStore {
             .unwrap_or_default()
     }
 
+    /// The archived scratchpads for a project, most recently archived first.
+    pub fn list_archived(&self, project_id: ProjectId, root: &Path) -> Vec<ScratchpadInfo> {
+        let inner = self.inner.lock().expect(LOCK_POISONED);
+        let mut archived: Vec<ScratchpadInfo> = inner
+            .scratchpads
+            .get(&key(root))
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|s| s.archived)
+                    .map(|s| s.info(project_id))
+                    .collect()
+            })
+            .unwrap_or_default();
+        archived.sort_by_key(|s| std::cmp::Reverse(s.archived_at));
+        archived
+    }
+
     /// Create a new scratchpad with an auto-generated timestamp title and
     /// empty content.
     pub fn add(
@@ -141,10 +168,12 @@ impl ScratchpadStore {
             title: timestamp_title(now),
             content: String::new(),
             archived: false,
+            archived_at: None,
             created_at: now,
             updated_at: now,
             updated_by: updated_by.to_string(),
             version: 1,
+            tags: Vec::new(),
         };
         let mut inner = self.inner.lock().expect(LOCK_POISONED);
         inner
@@ -173,12 +202,18 @@ impl ScratchpadStore {
 
     /// Replace a scratchpad's content, bumping `version` and stamping
     /// `updated_at`/`updated_by`.
+    ///
+    /// `expected_updated_at` must match the scratchpad's current
+    /// `updated_at` (compared under the same lock as the mutation) or the
+    /// update is rejected with [`CoreError::ScratchpadConflict`] instead of
+    /// silently overwriting a concurrent edit (e.g. an agent's over MCP).
     pub fn update_content(
         &self,
         project_id: ProjectId,
         root: &Path,
         id: ScratchpadId,
         content: &str,
+        expected_updated_at: DateTime<Utc>,
         updated_by: &str,
     ) -> CoreResult<ScratchpadInfo> {
         let mut inner = self.inner.lock().expect(LOCK_POISONED);
@@ -187,6 +222,9 @@ impl ScratchpadStore {
             .get_mut(&key(root))
             .and_then(|items| items.iter_mut().find(|s| s.id == id))
             .ok_or(CoreError::ScratchpadNotFound)?;
+        if scratchpad.updated_at != expected_updated_at {
+            return Err(CoreError::ScratchpadConflict);
+        }
         scratchpad.content = content.to_string();
         scratchpad.version += 1;
         scratchpad.updated_at = Utc::now();
@@ -198,12 +236,16 @@ impl ScratchpadStore {
 
     /// Revise a scratchpad's title. A blank title falls back to a
     /// timestamp title regenerated from `created_at`.
+    ///
+    /// `expected_updated_at` is checked the same way as in
+    /// [`Self::update_content`].
     pub fn update_title(
         &self,
         project_id: ProjectId,
         root: &Path,
         id: ScratchpadId,
         title: &str,
+        expected_updated_at: DateTime<Utc>,
         updated_by: &str,
     ) -> CoreResult<ScratchpadInfo> {
         let mut inner = self.inner.lock().expect(LOCK_POISONED);
@@ -212,6 +254,9 @@ impl ScratchpadStore {
             .get_mut(&key(root))
             .and_then(|items| items.iter_mut().find(|s| s.id == id))
             .ok_or(CoreError::ScratchpadNotFound)?;
+        if scratchpad.updated_at != expected_updated_at {
+            return Err(CoreError::ScratchpadConflict);
+        }
         let title = title.trim();
         scratchpad.title = if title.is_empty() {
             timestamp_title(scratchpad.created_at)
@@ -220,6 +265,77 @@ impl ScratchpadStore {
         };
         scratchpad.updated_at = Utc::now();
         scratchpad.updated_by = updated_by.to_string();
+        let info = scratchpad.info(project_id);
+        save(&inner)?;
+        Ok(info)
+    }
+
+    /// Add a free-text tag to a scratchpad. Blank tags are rejected; adding
+    /// a tag that already exists (exact match) is idempotent (no duplicate).
+    pub fn add_tag(
+        &self,
+        project_id: ProjectId,
+        root: &Path,
+        id: ScratchpadId,
+        tag: &str,
+    ) -> CoreResult<ScratchpadInfo> {
+        let tag = tag.trim();
+        if tag.is_empty() {
+            return Err(CoreError::InvalidInput("tag must not be empty".to_string()));
+        }
+        let mut inner = self.inner.lock().expect(LOCK_POISONED);
+        let scratchpad = inner
+            .scratchpads
+            .get_mut(&key(root))
+            .and_then(|items| items.iter_mut().find(|s| s.id == id))
+            .ok_or(CoreError::ScratchpadNotFound)?;
+        if !scratchpad.tags.iter().any(|t| t == tag) {
+            scratchpad.tags.push(tag.to_string());
+        }
+        let info = scratchpad.info(project_id);
+        save(&inner)?;
+        Ok(info)
+    }
+
+    /// Remove a tag from a scratchpad by exact value. Idempotent — removing
+    /// a tag that isn't present is a no-op (not an error), since tags are
+    /// plain values rather than ids.
+    pub fn remove_tag(
+        &self,
+        project_id: ProjectId,
+        root: &Path,
+        id: ScratchpadId,
+        tag: &str,
+    ) -> CoreResult<ScratchpadInfo> {
+        let mut inner = self.inner.lock().expect(LOCK_POISONED);
+        let scratchpad = inner
+            .scratchpads
+            .get_mut(&key(root))
+            .and_then(|items| items.iter_mut().find(|s| s.id == id))
+            .ok_or(CoreError::ScratchpadNotFound)?;
+        scratchpad.tags.retain(|t| t != tag);
+        let info = scratchpad.info(project_id);
+        save(&inner)?;
+        Ok(info)
+    }
+
+    /// Archive or unarchive a scratchpad. Archiving stamps `archived_at`;
+    /// unarchiving clears it and returns the item to the active list.
+    pub fn set_archived(
+        &self,
+        project_id: ProjectId,
+        root: &Path,
+        id: ScratchpadId,
+        archived: bool,
+    ) -> CoreResult<ScratchpadInfo> {
+        let mut inner = self.inner.lock().expect(LOCK_POISONED);
+        let scratchpad = inner
+            .scratchpads
+            .get_mut(&key(root))
+            .and_then(|items| items.iter_mut().find(|s| s.id == id))
+            .ok_or(CoreError::ScratchpadNotFound)?;
+        scratchpad.archived = archived;
+        scratchpad.archived_at = if archived { Some(Utc::now()) } else { None };
         let info = scratchpad.info(project_id);
         save(&inner)?;
         Ok(info)
@@ -293,7 +409,14 @@ mod tests {
         assert_eq!(added.version, 1);
 
         let updated = store
-            .update_content(project, &root, added.id, "hello world", "claude")
+            .update_content(
+                project,
+                &root,
+                added.id,
+                "hello world",
+                added.updated_at,
+                "claude",
+            )
             .unwrap();
         assert_eq!(updated.content, "hello world");
         assert_eq!(updated.version, 2);
@@ -301,9 +424,62 @@ mod tests {
         assert!(updated.updated_at >= added.updated_at);
 
         assert!(matches!(
-            store.update_content(project, &root, ScratchpadId::new(), "x", "y"),
+            store.update_content(
+                project,
+                &root,
+                ScratchpadId::new(),
+                "x",
+                updated.updated_at,
+                "y",
+            ),
             Err(CoreError::ScratchpadNotFound)
         ));
+    }
+
+    #[test]
+    fn update_content_rejects_stale_expected_updated_at() {
+        let store = ScratchpadStore::new();
+        let (project, root) = ids();
+        let added = store.add(project, &root, "User").unwrap();
+
+        // Someone else updates first, moving `updated_at` forward...
+        let first = store
+            .update_content(
+                project,
+                &root,
+                added.id,
+                "first edit",
+                added.updated_at,
+                "User",
+            )
+            .unwrap();
+
+        // ...so a second update still carrying the *original* timestamp
+        // conflicts instead of clobbering the first edit.
+        assert!(matches!(
+            store.update_content(
+                project,
+                &root,
+                added.id,
+                "stale edit",
+                added.updated_at,
+                "claude",
+            ),
+            Err(CoreError::ScratchpadConflict)
+        ));
+
+        // The fresh timestamp from the first update succeeds.
+        let second = store
+            .update_content(
+                project,
+                &root,
+                added.id,
+                "second edit",
+                first.updated_at,
+                "claude",
+            )
+            .unwrap();
+        assert_eq!(second.content, "second edit");
     }
 
     #[test]
@@ -314,14 +490,104 @@ mod tests {
         let original_title = added.title.clone();
 
         let renamed = store
-            .update_title(project, &root, added.id, "  My Notes  ", "User")
+            .update_title(
+                project,
+                &root,
+                added.id,
+                "  My Notes  ",
+                added.updated_at,
+                "User",
+            )
             .unwrap();
         assert_eq!(renamed.title, "My Notes");
 
         let cleared = store
-            .update_title(project, &root, added.id, "   ", "User")
+            .update_title(project, &root, added.id, "   ", renamed.updated_at, "User")
             .unwrap();
         assert_eq!(cleared.title, original_title);
+    }
+
+    #[test]
+    fn update_title_rejects_stale_expected_updated_at() {
+        let store = ScratchpadStore::new();
+        let (project, root) = ids();
+        let added = store.add(project, &root, "User").unwrap();
+
+        assert!(matches!(
+            store.update_title(
+                project,
+                &root,
+                added.id,
+                "New Title",
+                added.updated_at - chrono::Duration::seconds(1),
+                "User",
+            ),
+            Err(CoreError::ScratchpadConflict)
+        ));
+    }
+
+    #[test]
+    fn tags_are_added_deduped_and_removed_idempotently() {
+        let store = ScratchpadStore::new();
+        let (project, root) = ids();
+        let added = store.add(project, &root, "User").unwrap();
+        assert!(added.tags.is_empty());
+
+        let after = store
+            .add_tag(project, &root, added.id, "  urgent  ")
+            .unwrap();
+        assert_eq!(after.tags, vec!["urgent".to_string()]);
+
+        // Adding the same tag again is idempotent (no duplicate).
+        let again = store.add_tag(project, &root, added.id, "urgent").unwrap();
+        assert_eq!(again.tags, vec!["urgent".to_string()]);
+
+        let with_second = store.add_tag(project, &root, added.id, "backend").unwrap();
+        assert_eq!(
+            with_second.tags,
+            vec!["urgent".to_string(), "backend".to_string()]
+        );
+
+        assert!(matches!(
+            store.add_tag(project, &root, added.id, "   "),
+            Err(CoreError::InvalidInput(_))
+        ));
+
+        let removed = store
+            .remove_tag(project, &root, added.id, "urgent")
+            .unwrap();
+        assert_eq!(removed.tags, vec!["backend".to_string()]);
+
+        // Removing a tag that isn't present is a no-op, not an error.
+        let noop = store
+            .remove_tag(project, &root, added.id, "urgent")
+            .unwrap();
+        assert_eq!(noop.tags, vec!["backend".to_string()]);
+    }
+
+    #[test]
+    fn manual_archive_hides_from_list_and_unarchive_restores() {
+        let store = ScratchpadStore::new();
+        let (project, root) = ids();
+        let a = store.add(project, &root, "User").unwrap();
+        let b = store.add(project, &root, "User").unwrap();
+
+        let archived = store.set_archived(project, &root, b.id, true).unwrap();
+        assert!(archived.archived);
+        assert!(archived.archived_at.is_some());
+
+        let active = store.list(project, &root);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, a.id);
+        let arch = store.list_archived(project, &root);
+        assert_eq!(arch.len(), 1);
+        assert_eq!(arch[0].id, b.id);
+
+        let restored = store.set_archived(project, &root, b.id, false).unwrap();
+        assert!(!restored.archived);
+        assert!(restored.archived_at.is_none());
+        assert_eq!(store.list(project, &root).len(), 2);
+        assert!(store.list_archived(project, &root).is_empty());
     }
 
     #[test]
@@ -355,7 +621,14 @@ mod tests {
         store.set_path(file.clone());
         let added = store.add(project, &root, "User").unwrap();
         store
-            .update_content(project, &root, added.id, "survive a restart", "User")
+            .update_content(
+                project,
+                &root,
+                added.id,
+                "survive a restart",
+                added.updated_at,
+                "User",
+            )
             .unwrap();
 
         let reloaded = ScratchpadStore::new();

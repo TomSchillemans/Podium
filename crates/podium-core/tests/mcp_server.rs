@@ -7,7 +7,8 @@ use std::time::Duration;
 use podium_core::mcp::tools::{
     AddTodoLinkParams, AddTodoParams, AssignTodoParams, CommentTodoParams, CreateScratchpadParams,
     GetProcessOutputParams, ListScratchpadsParams, ListTodosParams, PodiumTools,
-    RenameSessionParams, SpawnAgentParams, UpdateScratchpadParams, UpdateTodoParams,
+    RenameSessionParams, ScratchpadTagParams, SetScratchpadArchivedParams, SpawnAgentParams,
+    UpdateScratchpadParams, UpdateTodoParams,
 };
 use podium_core::mcp::{self, McpServer};
 use podium_core::{
@@ -248,7 +249,14 @@ async fn tools_list_includes_scratchpad_tools() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect::<Vec<_>>();
-    for name in ["list_scratchpads", "create_scratchpad", "update_scratchpad"] {
+    for name in [
+        "list_scratchpads",
+        "create_scratchpad",
+        "update_scratchpad",
+        "add_scratchpad_tag",
+        "remove_scratchpad_tag",
+        "set_scratchpad_archived",
+    ] {
         assert!(
             tools.contains(&name),
             "{name} missing from tools/list: {tools:?}"
@@ -418,12 +426,17 @@ async fn create_scratchpad_round_trip_via_mcp() {
         .as_str()
         .expect("scratchpad id")
         .to_string();
+    let created_updated_at = created_json["updatedAt"]
+        .as_str()
+        .expect("updatedAt")
+        .to_string();
 
     let updated = tools
         .update_scratchpad(Parameters(UpdateScratchpadParams {
             project_id: project_id.to_string(),
             id: scratchpad_id.clone(),
             content: "meeting notes".to_string(),
+            expected_updated_at: created_updated_at.clone(),
             author: None,
         }))
         .await
@@ -434,13 +447,30 @@ async fn create_scratchpad_round_trip_via_mcp() {
         updated_text.contains("\"updatedBy\": \"agent\""),
         "{updated_text:?}"
     );
+    let updated_json: serde_json::Value = serde_json::from_str(&updated_text).unwrap();
+    let updated_updated_at = updated_json["updatedAt"].as_str().unwrap().to_string();
 
-    // An explicit author overrides the "agent" default.
+    // A stale expected_updated_at (the original create timestamp, since
+    // superseded) is rejected as a conflict instead of clobbering the edit.
+    let stale = tools
+        .update_scratchpad(Parameters(UpdateScratchpadParams {
+            project_id: project_id.to_string(),
+            id: scratchpad_id.clone(),
+            content: "stale content".to_string(),
+            expected_updated_at: created_updated_at,
+            author: None,
+        }))
+        .await;
+    assert!(stale.is_err(), "stale timestamp must be rejected");
+
+    // An explicit author overrides the "agent" default; the fresh timestamp
+    // from the prior update succeeds.
     let renamed_author = tools
         .update_scratchpad(Parameters(UpdateScratchpadParams {
             project_id: project_id.to_string(),
-            id: scratchpad_id,
+            id: scratchpad_id.clone(),
             content: "meeting notes v2".to_string(),
+            expected_updated_at: updated_updated_at,
             author: Some("claude-code".to_string()),
         }))
         .await
@@ -450,6 +480,37 @@ async fn create_scratchpad_round_trip_via_mcp() {
         renamed_text.contains("\"updatedBy\": \"claude-code\""),
         "{renamed_text:?}"
     );
+
+    // Tags and archiving round-trip too.
+    let tagged = tools
+        .add_scratchpad_tag(Parameters(ScratchpadTagParams {
+            project_id: project_id.to_string(),
+            id: scratchpad_id.clone(),
+            tag: "meeting".to_string(),
+        }))
+        .await
+        .expect("add_scratchpad_tag");
+    assert!(first_text(&tagged).contains("meeting"));
+
+    let untagged = tools
+        .remove_scratchpad_tag(Parameters(ScratchpadTagParams {
+            project_id: project_id.to_string(),
+            id: scratchpad_id.clone(),
+            tag: "meeting".to_string(),
+        }))
+        .await
+        .expect("remove_scratchpad_tag");
+    assert!(!first_text(&untagged).contains("\"meeting\""));
+
+    let archived = tools
+        .set_scratchpad_archived(Parameters(SetScratchpadArchivedParams {
+            project_id: project_id.to_string(),
+            id: scratchpad_id,
+            archived: true,
+        }))
+        .await
+        .expect("set_scratchpad_archived");
+    assert!(first_text(&archived).contains("\"archived\": true"));
 
     orch.shutdown().await;
 }
