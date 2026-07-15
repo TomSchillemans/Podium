@@ -412,4 +412,124 @@ describe("ScratchpadDetailPane", () => {
         .value,
     ).toBe("my edit");
   });
+
+  it("force save also persists a pending title edit, not just content", async () => {
+    vi.useFakeTimers();
+    const serverVersion = scratchpad({
+      title: "Agent's title",
+      updatedAt: "2024-04-03T12:05:00Z",
+      version: 2,
+    });
+    let titleCalls = 0;
+    const updateTitle = vi.fn((_p, _id, title: string) => {
+      titleCalls += 1;
+      if (titleCalls === 1) return Promise.resolve({ conflict: true as const });
+      return Promise.resolve(scratchpad({ title, version: 3 }));
+    });
+    const updateContent = vi.fn((_p, _id, content: string) =>
+      Promise.resolve(scratchpad({ content, version: 3 })),
+    );
+    const refresh = vi.fn(() => {
+      useScratchpadStore.setState({
+        scratchpadsByProject: { [PROJECT]: [serverVersion] },
+      });
+      return Promise.resolve();
+    });
+    seed();
+    useScratchpadStore.setState({ updateTitle, updateContent, refresh });
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    const titleInput = screen.getByLabelText("Scratchpad title");
+    fireEvent.change(titleInput, { target: { value: "My title" } });
+    fireEvent.blur(titleInput);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    // The user's typed title stays visible while the banner is up.
+    expect((screen.getByLabelText("Scratchpad title") as HTMLInputElement).value).toBe(
+      "My title",
+    );
+
+    fireEvent.click(screen.getByText("Force save"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(updateTitle).toHaveBeenCalledWith(
+      PROJECT,
+      SCRATCHPAD,
+      "My title",
+      "2024-04-03T12:05:00Z",
+    );
+    // Content wasn't touched, so it must not have been resaved.
+    expect(updateContent).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // The user's title stays visible — Force Save must not have been
+    // silently dropped in favor of the (never-conflicting) content path.
+    expect((screen.getByLabelText("Scratchpad title") as HTMLInputElement).value).toBe(
+      "My title",
+    );
+  });
+
+  it("typing through a pending conflict keeps re-detecting it instead of silently overwriting the concurrent edit", async () => {
+    vi.useFakeTimers();
+    const serverVersion = scratchpad({
+      content: "agent's version",
+      updatedAt: "2024-04-03T12:05:00Z",
+      version: 2,
+    });
+    const updateContent = vi.fn(() =>
+      Promise.resolve({ conflict: true as const }),
+    );
+    const refresh = vi.fn(() => {
+      useScratchpadStore.setState({
+        scratchpadsByProject: { [PROJECT]: [serverVersion] },
+      });
+      return Promise.resolve();
+    });
+    seed();
+    useScratchpadStore.setState({ updateContent, refresh });
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Scratchpad content"), {
+      target: { value: "my stale edit" },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(updateContent).toHaveBeenCalledTimes(1);
+
+    // The user keeps typing instead of clicking Reload/Force Save. If the
+    // `expectedUpdatedAt` base had silently advanced to the server's fresh
+    // timestamp (pulled in by refresh()), this next autosave would succeed
+    // and clobber the concurrent edit without the user ever deciding.
+    fireEvent.change(screen.getByLabelText("Scratchpad content"), {
+      target: { value: "my stale edit, continued" },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(updateContent).toHaveBeenCalledTimes(2);
+    expect(updateContent).toHaveBeenLastCalledWith(
+      PROJECT,
+      SCRATCHPAD,
+      "my stale edit, continued",
+      "2024-04-03T12:00:00Z",
+    );
+    // Still conflicted — the second autosave must not have silently succeeded.
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
 });

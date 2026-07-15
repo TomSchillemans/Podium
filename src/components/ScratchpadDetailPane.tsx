@@ -110,15 +110,20 @@ export function ScratchpadDetailPane({
     savedContentRef.current = scratchpad.content;
   }, [scratchpad, conflict]);
 
-  // Advance the conflict-detection base only while no save is in flight —
-  // if a debounced autosave is pending, this pane's local edit hasn't been
-  // sent yet, so silently adopting a newer `updatedAt` here would let that
-  // pending save clobber whatever produced it.
+  // Advance the conflict-detection base only while no save is in flight and
+  // no conflict banner is up — if a debounced autosave is pending, this
+  // pane's local edit hasn't been sent yet, so silently adopting a newer
+  // `updatedAt` here would let that pending save clobber whatever produced
+  // it. The `conflict` guard matters too: the banner's `refresh()` pulls in
+  // the concurrent edit's fresh `updatedAt`, and without this guard the next
+  // autosave (triggered by the user simply continuing to type) would quietly
+  // succeed with that fresh timestamp — clobbering the conflicting edit
+  // without the user ever choosing Reload or Force Save.
   useEffect(() => {
-    if (scratchpad === undefined) return;
+    if (scratchpad === undefined || conflict) return;
     if (saveTimerRef.current) return;
     expectedUpdatedAtRef.current = scratchpad.updatedAt;
-  }, [scratchpad]);
+  }, [scratchpad, conflict]);
 
   // The open scratchpad vanished (removed, or archived here or by an agent):
   // close the pane.
@@ -207,26 +212,59 @@ export function ScratchpadDetailPane({
     setConflict(false);
   };
 
-  // Retry the save with the scratchpad's current `updatedAt` (refreshed by
-  // the conflict handler), overwriting the concurrent edit with this pane's
-  // content.
+  // Retry the save(s) with the scratchpad's current `updatedAt` (refreshed
+  // by the conflict handler), overwriting the concurrent edit with this
+  // pane's title and/or content. The conflict can originate from either a
+  // title save (`commitTitle`) or a content save (`handleContentChange`), so
+  // this must not assume it's always content — the title effect stays
+  // frozen while `conflict` is true, so `title`/`scratchpad.title` diverging
+  // means there's a pending title edit that also needs to survive Force
+  // Save, not just get silently overwritten once the banner clears.
   const forceSave = () => {
-    void updateContent(
-      projectId,
-      scratchpadId,
-      latestContentRef.current,
-      scratchpad.updatedAt,
-    ).then((result) => {
-      if (result === null) return;
-      if ("conflict" in result) {
-        // Someone edited again in the meantime; refresh and let the user retry.
-        void refresh(projectId);
-        return;
+    const titleDirty = title.trim() !== scratchpad.title;
+    const contentDirty = latestContentRef.current !== scratchpad.content;
+
+    void (async () => {
+      let expected = scratchpad.updatedAt;
+
+      if (titleDirty) {
+        const result = await updateTitle(
+          projectId,
+          scratchpadId,
+          title.trim(),
+          expected,
+        );
+        if (result === null) return;
+        if ("conflict" in result) {
+          // Someone edited again in the meantime; refresh and let the user retry.
+          void refresh(projectId);
+          return;
+        }
+        savedTitleRef.current = result.title;
+        setTitle(result.title);
+        expected = result.updatedAt;
       }
-      savedContentRef.current = result.content;
-      expectedUpdatedAtRef.current = result.updatedAt;
+
+      if (contentDirty) {
+        const result = await updateContent(
+          projectId,
+          scratchpadId,
+          latestContentRef.current,
+          expected,
+        );
+        if (result === null) return;
+        if ("conflict" in result) {
+          // Someone edited again in the meantime; refresh and let the user retry.
+          void refresh(projectId);
+          return;
+        }
+        savedContentRef.current = result.content;
+        expected = result.updatedAt;
+      }
+
+      expectedUpdatedAtRef.current = expected;
       setConflict(false);
-    });
+    })();
   };
 
   return (
