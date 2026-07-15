@@ -1,12 +1,14 @@
 import Placeholder from "@tiptap/extension-placeholder";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { act, renderHook } from "@testing-library/react";
 import { Markdown } from "tiptap-markdown";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   extractHeadings,
   scrollToHeading,
+  useHeadings,
   type Heading,
 } from "./tiptapHeadings";
 
@@ -110,5 +112,58 @@ describe("scrollToHeading", () => {
       Math.min(second.pos + 1, editor.state.doc.content.size),
     );
     expect(editor.storage.markdown.getMarkdown()).toBe(before);
+  });
+});
+
+describe("useHeadings", () => {
+  let editor: Editor | null = null;
+
+  afterEach(() => {
+    editor?.destroy();
+    editor = null;
+  });
+
+  it("recomputes on a doc-changing transaction, including a suppressed-emitUpdate setContent", () => {
+    editor = makeEditor("## First");
+    const { result } = renderHook(() => useHeadings(editor));
+    expect(result.current.map((h) => h.text)).toEqual(["First"]);
+
+    // `ScratchpadEditor` adopts external/agent edits via
+    // `setContent(content, { emitUpdate: false })`, which suppresses
+    // Tiptap's `update` event but still dispatches a transaction — this is
+    // exactly the case `useHeadings` must not miss.
+    act(() => {
+      editor?.commands.setContent("## First\n\n## Second", {
+        emitUpdate: false,
+      });
+    });
+
+    expect(result.current.map((h) => h.text)).toEqual(["First", "Second"]);
+  });
+
+  it("does not recompute for a selection-only transaction", () => {
+    editor = makeEditor("## First\n\n## Second");
+    const { result } = renderHook(() => useHeadings(editor));
+    const initial = result.current;
+
+    act(() => {
+      if (editor) scrollToHeading(editor, initial[1].pos);
+    });
+
+    // Same array reference: no state update fired for the selection change.
+    expect(result.current).toBe(initial);
+  });
+
+  it("returns an empty list once the editor is gone", () => {
+    editor = makeEditor("## First");
+    const { result, rerender } = renderHook<Heading[], { e: Editor | null }>(
+      ({ e }) => useHeadings(e),
+      { initialProps: { e: editor as Editor | null } },
+    );
+    expect(result.current).toHaveLength(1);
+
+    rerender({ e: null });
+
+    expect(result.current).toEqual([]);
   });
 });
