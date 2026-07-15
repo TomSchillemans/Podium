@@ -257,8 +257,10 @@ export interface ScratchpadInfo {
   projectId: ProjectId;
   title: string;
   content: string;
-  /** Always `false` for now — archiving lands in a later phase. */
+  /** Whether the scratchpad is archived (hidden from the main list). */
   archived: boolean;
+  /** RFC 3339 timestamp of when it was archived; `null` while active. */
+  archivedAt: string | null;
   /** RFC 3339 creation timestamp. */
   createdAt: string;
   /** RFC 3339 timestamp of the last edit. */
@@ -267,6 +269,8 @@ export interface ScratchpadInfo {
   updatedBy: string;
   /** Increments on every content update, starting at 1. */
   version: number;
+  /** Free-text tags, addable by the user and by agents over MCP. */
+  tags: string[];
 }
 
 /** Structured error every IPC command can reject with (`IpcError`). */

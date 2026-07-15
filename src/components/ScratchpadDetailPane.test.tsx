@@ -27,10 +27,12 @@ function scratchpad(overrides: Partial<ScratchpadInfo> = {}): ScratchpadInfo {
     title: "Untitled scratchpad",
     content: "",
     archived: false,
+    archivedAt: null,
     createdAt: "2024-04-03T12:00:00Z",
     updatedAt: "2024-04-03T12:00:00Z",
     updatedBy: "User",
     version: 1,
+    tags: [],
     ...overrides,
   };
 }
@@ -43,16 +45,37 @@ function seed(overrides: Partial<ScratchpadInfo> = {}) {
   const updateTitle = vi.fn((_projectId, _id, title: string) =>
     Promise.resolve(scratchpad({ ...overrides, title })),
   );
+  const addTag = vi.fn((_projectId, _id, tag: string) =>
+    Promise.resolve(scratchpad({ ...overrides, tags: [tag] })),
+  );
+  const removeTag = vi.fn(() =>
+    Promise.resolve(scratchpad({ ...overrides, tags: [] })),
+  );
+  const setScratchpadArchived = vi.fn(() =>
+    Promise.resolve(scratchpad({ ...overrides, archived: true })),
+  );
+  const refresh = vi.fn(() => Promise.resolve());
   useScratchpadStore.setState(
     {
       ...initialScratchpad,
       scratchpadsByProject: { [PROJECT]: [scratchpad(overrides)] },
       updateContent,
       updateTitle,
+      addTag,
+      removeTag,
+      setScratchpadArchived,
+      refresh,
     },
     true,
   );
-  return { updateContent, updateTitle };
+  return {
+    updateContent,
+    updateTitle,
+    addTag,
+    removeTag,
+    setScratchpadArchived,
+    refresh,
+  };
 }
 
 describe("ScratchpadDetailPane", () => {
@@ -84,6 +107,7 @@ describe("ScratchpadDetailPane", () => {
       PROJECT,
       SCRATCHPAD,
       "Some notes",
+      "2024-04-03T12:00:00Z",
     );
   });
 
@@ -112,6 +136,7 @@ describe("ScratchpadDetailPane", () => {
       PROJECT,
       SCRATCHPAD,
       "Some notes that never paused",
+      "2024-04-03T12:00:00Z",
     );
   });
 
@@ -213,6 +238,137 @@ describe("ScratchpadDetailPane", () => {
     fireEvent.change(input, { target: { value: "Renamed" } });
     fireEvent.blur(input);
 
-    expect(updateTitle).toHaveBeenCalledWith(PROJECT, SCRATCHPAD, "Renamed");
+    expect(updateTitle).toHaveBeenCalledWith(
+      PROJECT,
+      SCRATCHPAD,
+      "Renamed",
+      "2024-04-03T12:00:00Z",
+    );
+  });
+
+  it("archives via the archive button", () => {
+    const { setScratchpadArchived } = seed();
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Archive scratchpad"));
+    expect(setScratchpadArchived).toHaveBeenCalledWith(
+      PROJECT,
+      SCRATCHPAD,
+      true,
+    );
+  });
+
+  it("renders existing tags and adds a new one", () => {
+    const { addTag } = seed({ tags: ["urgent"] });
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    expect(screen.getByText("urgent")).toBeInTheDocument();
+
+    const input = screen.getByLabelText("Add tag");
+    fireEvent.change(input, { target: { value: "backend" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(addTag).toHaveBeenCalledWith(PROJECT, SCRATCHPAD, "backend");
+  });
+
+  it("blank tag submission is a no-op", () => {
+    const { addTag } = seed();
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    const input = screen.getByLabelText("Add tag");
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(addTag).not.toHaveBeenCalled();
+  });
+
+  it("removes a tag via its chip button", () => {
+    const { removeTag } = seed({ tags: ["urgent"] });
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Remove tag urgent"));
+    expect(removeTag).toHaveBeenCalledWith(PROJECT, SCRATCHPAD, "urgent");
+  });
+
+  it("shows a conflict banner and reload discards the local edit", async () => {
+    vi.useFakeTimers();
+    const updateContent = vi.fn(() =>
+      Promise.resolve({ conflict: true as const }),
+    );
+    const refresh = vi.fn(() => Promise.resolve());
+    seed();
+    useScratchpadStore.setState({ updateContent, refresh });
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Scratchpad content"), {
+      target: { value: "my stale edit" },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      // Let the resolved promise's `.then` run under fake timers.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalledWith(PROJECT);
+
+    fireEvent.click(screen.getByText("Reload"));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      (screen.getByLabelText("Scratchpad content") as HTMLTextAreaElement)
+        .value,
+    ).toBe("");
+  });
+
+  it("force save retries the update with the current updatedAt", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const updateContent = vi.fn(() => {
+      calls += 1;
+      if (calls === 1) return Promise.resolve({ conflict: true as const });
+      return Promise.resolve(scratchpad({ content: "my edit", version: 2 }));
+    });
+    const refresh = vi.fn(() => Promise.resolve());
+    seed();
+    useScratchpadStore.setState({ updateContent, refresh });
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Scratchpad content"), {
+      target: { value: "my edit" },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Force save"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(updateContent).toHaveBeenLastCalledWith(
+      PROJECT,
+      SCRATCHPAD,
+      "my edit",
+      "2024-04-03T12:00:00Z",
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

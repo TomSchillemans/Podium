@@ -24,10 +24,12 @@ function scratchpad(id: string, title: string): ScratchpadInfo {
     title,
     content: "",
     archived: false,
+    archivedAt: null,
     createdAt: "2024-04-03T12:00:00Z",
     updatedAt: "2024-04-03T12:00:00Z",
     updatedBy: "User",
     version: 1,
+    tags: [],
   };
 }
 
@@ -37,16 +39,22 @@ function seed(scratchpads: ScratchpadInfo[]) {
   const addScratchpad = vi.fn(() =>
     Promise.resolve(scratchpad("new-1", "Untitled")),
   );
+  const setScratchpadArchived = vi.fn(() =>
+    Promise.resolve(scratchpad("a", "Scratchpad A")),
+  );
+  const refreshArchived = vi.fn(() => Promise.resolve());
   useScratchpadStore.setState(
     {
       ...initialScratchpad,
       scratchpadsByProject: { [PROJECT]: scratchpads },
       refresh,
       addScratchpad,
+      setScratchpadArchived,
+      refreshArchived,
     },
     true,
   );
-  return { refresh, addScratchpad };
+  return { refresh, addScratchpad, setScratchpadArchived, refreshArchived };
 }
 
 describe("ScratchpadSubsection", () => {
@@ -103,5 +111,26 @@ describe("ScratchpadSubsection", () => {
     );
 
     expect(screen.getByText("No scratchpads yet.")).toBeInTheDocument();
+  });
+
+  it("archives a scratchpad via its row action", () => {
+    const { setScratchpadArchived } = seed([scratchpad("a", "Scratchpad A")]);
+    render(
+      <ScratchpadSubsection projectId={PROJECT} onOpenScratchpad={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Archive scratchpad "Scratchpad A"'));
+    expect(setScratchpadArchived).toHaveBeenCalledWith(PROJECT, "a", true);
+  });
+
+  it("opens the archive modal from the header button", async () => {
+    const { refreshArchived } = seed([scratchpad("a", "Scratchpad A")]);
+    render(
+      <ScratchpadSubsection projectId={PROJECT} onOpenScratchpad={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByLabelText("View archived scratchpads"));
+    await waitFor(() => expect(refreshArchived).toHaveBeenCalledWith(PROJECT));
+    expect(screen.getByText("Archived scratchpads")).toBeInTheDocument();
   });
 });

@@ -1,12 +1,18 @@
 /**
  * Work-area pane for an opened scratchpad: a header with an inline-editable
- * title and a close button, over a plain content textarea (Tiptap rich text
- * lands in Phase 2) with debounced autosave, and a footer showing when it
- * was last touched. Scratchpads are shared with agents over MCP, so the pane
- * reads the live scratchpad from the store by id and reflects
- * `scratchpad:changed` refreshes while open — external edits are only
- * adopted when there is no unsaved local change pending, so an agent's edit
- * never clobbers text the user is mid-typing.
+ * title, an archive button, and a close button, over a tag row and a plain
+ * content textarea (Tiptap rich text lands in Phase 2) with debounced
+ * autosave, and a footer showing when it was last touched. Scratchpads are
+ * shared with agents over MCP, so the pane reads the live scratchpad from
+ * the store by id and reflects `scratchpad:changed` refreshes while open —
+ * external edits are only adopted when there is no unsaved local change
+ * pending, so an agent's edit never clobbers text the user is mid-typing.
+ *
+ * Content/title saves carry the scratchpad's last-known `updatedAt`; if a
+ * concurrent edit (the user in another window, or an agent) landed first,
+ * the save is rejected as a conflict instead of silently overwriting it —
+ * an in-pane banner then offers "Reload" (discard the local edit, adopt the
+ * latest) or "Force save" (retry with the fresh timestamp).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -15,8 +21,9 @@ import type { ProjectId, ScratchpadId, ScratchpadInfo } from "../ipc/types";
 import { formatUpdatedAt } from "../lib/dateFormat";
 import { useLayoutStore } from "../state/layoutStore";
 import { useScratchpadStore } from "../state/scratchpadStore";
-import { CloseIcon, ScratchpadIcon } from "./icons";
+import { ArchiveIcon, CloseIcon, ScratchpadIcon } from "./icons";
 import styles from "./ScratchpadDetailPane.module.css";
+import { TagChip } from "./TagChip";
 
 const NO_SCRATCHPADS: ScratchpadInfo[] = [];
 
@@ -37,16 +44,31 @@ export function ScratchpadDetailPane({
   );
   const updateContent = useScratchpadStore((s) => s.updateContent);
   const updateTitle = useScratchpadStore((s) => s.updateTitle);
+  const addTag = useScratchpadStore((s) => s.addTag);
+  const removeTag = useScratchpadStore((s) => s.removeTag);
+  const setScratchpadArchived = useScratchpadStore(
+    (s) => s.setScratchpadArchived,
+  );
+  const refresh = useScratchpadStore((s) => s.refresh);
   const clearOpenScratchpad = useLayoutStore((s) => s.clearOpenScratchpad);
 
   const [title, setTitle] = useState(scratchpad?.title ?? "");
   const [content, setContent] = useState(scratchpad?.content ?? "");
+  // Whether the last save attempt was rejected as a conflict (someone else
+  // edited the scratchpad first) — shows the reload/force-save banner.
+  const [conflict, setConflict] = useState(false);
   // The last value we know is in sync with the store (either what we last
   // saved, or the last value pulled in from it) — comparing against this
   // (rather than the live state) is what lets an external refresh update the
   // field without a dependency cycle back through the state it's comparing.
   const savedTitleRef = useRef(scratchpad?.title ?? "");
   const savedContentRef = useRef(scratchpad?.content ?? "");
+  // The scratchpad's `updatedAt` this pane last knew to be current — echoed
+  // back verbatim as `expectedUpdatedAt` on the next save. Only advances
+  // while no edit is in flight (see the sync effect below), so a concurrent
+  // edit that lands mid-typing is still caught as a conflict rather than
+  // silently adopted as the new "expected" base.
+  const expectedUpdatedAtRef = useRef(scratchpad?.updatedAt ?? "");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The latest content the textarea holds, kept in a ref (not just closed
   // over by the debounce timer) so the unmount flush below can always save
@@ -84,7 +106,18 @@ export function ScratchpadDetailPane({
     savedContentRef.current = scratchpad.content;
   }, [scratchpad]);
 
-  // The open scratchpad vanished (removed here or by an agent): close the pane.
+  // Advance the conflict-detection base only while no save is in flight —
+  // if a debounced autosave is pending, this pane's local edit hasn't been
+  // sent yet, so silently adopting a newer `updatedAt` here would let that
+  // pending save clobber whatever produced it.
+  useEffect(() => {
+    if (scratchpad === undefined) return;
+    if (saveTimerRef.current) return;
+    expectedUpdatedAtRef.current = scratchpad.updatedAt;
+  }, [scratchpad]);
+
+  // The open scratchpad vanished (removed, or archived here or by an agent):
+  // close the pane.
   useEffect(() => {
     if (scratchpad === undefined) clearOpenScratchpad();
   }, [scratchpad, clearOpenScratchpad]);
@@ -107,6 +140,7 @@ export function ScratchpadDetailPane({
         projectIdRef.current,
         scratchpadIdRef.current,
         latestContentRef.current,
+        expectedUpdatedAtRef.current,
       );
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -121,9 +155,19 @@ export function ScratchpadDetailPane({
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
       savedContentRef.current = value;
-      void updateContent(projectId, scratchpadId, value).then((info) => {
-        if (info) savedContentRef.current = info.content;
-      });
+      const expected = expectedUpdatedAtRef.current;
+      void updateContent(projectId, scratchpadId, value, expected).then(
+        (result) => {
+          if (result === null) return;
+          if ("conflict" in result) {
+            setConflict(true);
+            void refresh(projectId);
+            return;
+          }
+          savedContentRef.current = result.content;
+          expectedUpdatedAtRef.current = result.updatedAt;
+        },
+      );
     }, AUTOSAVE_DELAY_MS);
   };
 
@@ -131,11 +175,53 @@ export function ScratchpadDetailPane({
     const trimmed = title.trim();
     if (trimmed === scratchpad.title) return;
     savedTitleRef.current = trimmed;
-    void updateTitle(projectId, scratchpadId, trimmed).then((info) => {
-      if (info) {
-        savedTitleRef.current = info.title;
-        setTitle(info.title);
+    const expected = expectedUpdatedAtRef.current;
+    void updateTitle(projectId, scratchpadId, trimmed, expected).then(
+      (result) => {
+        if (result === null) return;
+        if ("conflict" in result) {
+          setConflict(true);
+          void refresh(projectId);
+          return;
+        }
+        savedTitleRef.current = result.title;
+        setTitle(result.title);
+        expectedUpdatedAtRef.current = result.updatedAt;
+      },
+    );
+  };
+
+  // Discard the local edit and adopt the latest content/title from the
+  // store (the conflict handler already triggered a `refresh`).
+  const reloadFromServer = () => {
+    setContent(scratchpad.content);
+    setTitle(scratchpad.title);
+    savedContentRef.current = scratchpad.content;
+    savedTitleRef.current = scratchpad.title;
+    latestContentRef.current = scratchpad.content;
+    expectedUpdatedAtRef.current = scratchpad.updatedAt;
+    setConflict(false);
+  };
+
+  // Retry the save with the scratchpad's current `updatedAt` (refreshed by
+  // the conflict handler), overwriting the concurrent edit with this pane's
+  // content.
+  const forceSave = () => {
+    void updateContent(
+      projectId,
+      scratchpadId,
+      latestContentRef.current,
+      scratchpad.updatedAt,
+    ).then((result) => {
+      if (result === null) return;
+      if ("conflict" in result) {
+        // Someone edited again in the meantime; refresh and let the user retry.
+        void refresh(projectId);
+        return;
       }
+      savedContentRef.current = result.content;
+      expectedUpdatedAtRef.current = result.updatedAt;
+      setConflict(false);
     });
   };
 
@@ -159,6 +245,17 @@ export function ScratchpadDetailPane({
         <button
           type="button"
           className={styles.closeBtn}
+          aria-label="Archive scratchpad"
+          title="Archive"
+          onClick={() =>
+            void setScratchpadArchived(projectId, scratchpadId, true)
+          }
+        >
+          <ArchiveIcon />
+        </button>
+        <button
+          type="button"
+          className={styles.closeBtn}
           aria-label="Close scratchpad"
           title="Close"
           onClick={clearOpenScratchpad}
@@ -166,6 +263,28 @@ export function ScratchpadDetailPane({
           <CloseIcon />
         </button>
       </header>
+
+      <TagChip
+        tags={scratchpad.tags}
+        onAdd={(tag) => void addTag(projectId, scratchpadId, tag)}
+        onRemove={(tag) => void removeTag(projectId, scratchpadId, tag)}
+      />
+
+      {conflict && (
+        <div className={styles.conflictBanner} role="alert">
+          <span>
+            This scratchpad was updated elsewhere while you were editing.
+          </span>
+          <div className={styles.conflictActions}>
+            <button type="button" onClick={reloadFromServer}>
+              Reload
+            </button>
+            <button type="button" onClick={forceSave}>
+              Force save
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className={styles.body}>
         <textarea
