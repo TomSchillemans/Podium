@@ -48,6 +48,19 @@ export function ScratchpadDetailPane({
   const savedTitleRef = useRef(scratchpad?.title ?? "");
   const savedContentRef = useRef(scratchpad?.content ?? "");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The latest content the textarea holds, kept in a ref (not just closed
+  // over by the debounce timer) so the unmount flush below can always save
+  // the current value instead of a stale one from an earlier render.
+  const latestContentRef = useRef(scratchpad?.content ?? "");
+  const projectIdRef = useRef(projectId);
+  const scratchpadIdRef = useRef(scratchpadId);
+  // Whether the scratchpad still exists in the store, tracked in a ref (not
+  // just the closed-over `scratchpad` variable) so the unmount flush below
+  // sees the latest answer even though its effect only runs once.
+  const existsRef = useRef(scratchpad !== undefined);
+  projectIdRef.current = projectId;
+  scratchpadIdRef.current = scratchpadId;
+  existsRef.current = scratchpad !== undefined;
 
   // Adopt an external title change (e.g. an agent rename) only when the
   // field has no unsaved local edit pending.
@@ -76,19 +89,36 @@ export function ScratchpadDetailPane({
     if (scratchpad === undefined) clearOpenScratchpad();
   }, [scratchpad, clearOpenScratchpad]);
 
-  // Cancel any pending autosave on unmount so a save can't fire after close.
+  // Flush a pending debounced autosave on unmount (closing the pane, or
+  // switching to another pane/process) instead of just cancelling it — the
+  // debounce timer resets on every keystroke, so a user who types
+  // continuously and then immediately closes the pane would otherwise lose
+  // the entire unsaved edit. Uses refs (not the closed-over `content`/props)
+  // so it always saves the latest value even though this effect only runs
+  // once. Skipped if the scratchpad was removed out from under us (e.g. an
+  // agent deleted it) — saving would just fail with "not found".
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (!saveTimerRef.current) return;
+      clearTimeout(saveTimerRef.current);
+      if (!existsRef.current) return;
+      void updateContent(
+        projectIdRef.current,
+        scratchpadIdRef.current,
+        latestContentRef.current,
+      );
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (scratchpad === undefined) return null;
 
   const handleContentChange = (value: string) => {
     setContent(value);
+    latestContentRef.current = value;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
       savedContentRef.current = value;
       void updateContent(projectId, scratchpadId, value).then((info) => {
         if (info) savedContentRef.current = info.content;

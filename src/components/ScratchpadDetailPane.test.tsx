@@ -87,6 +87,46 @@ describe("ScratchpadDetailPane", () => {
     );
   });
 
+  it("flushes a pending debounced save on unmount instead of dropping it", () => {
+    vi.useFakeTimers();
+    const { updateContent } = seed();
+    const { unmount } = render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    // Simulate continuous typing: the debounce timer keeps resetting, so no
+    // save has fired yet when the pane closes.
+    fireEvent.change(screen.getByLabelText("Scratchpad content"), {
+      target: { value: "Some notes tha" },
+    });
+    vi.advanceTimersByTime(200);
+    fireEvent.change(screen.getByLabelText("Scratchpad content"), {
+      target: { value: "Some notes that never paused" },
+    });
+
+    expect(updateContent).not.toHaveBeenCalled();
+
+    unmount();
+
+    expect(updateContent).toHaveBeenCalledWith(
+      PROJECT,
+      SCRATCHPAD,
+      "Some notes that never paused",
+    );
+  });
+
+  it("does not flush on unmount when there is no pending save", () => {
+    vi.useFakeTimers();
+    const { updateContent } = seed();
+    const { unmount } = render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    unmount();
+
+    expect(updateContent).not.toHaveBeenCalled();
+  });
+
   it("footer_shows_author_and_version_from_store", () => {
     seed({ updatedBy: "claude-code", version: 3 });
     render(
