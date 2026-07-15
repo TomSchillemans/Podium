@@ -231,6 +231,10 @@ maps camelCase JS argument keys to the snake_case Rust parameters.
 | `todo_remove_link`      | `{ projectId, todoId, linkId }`             | `TodoInfo`        |
 | `todo_remove`           | `{ projectId, todoId }`                     | –                 |
 | `todo_unassign`         | `{ projectId, todoId }`                     | `TodoInfo`        |
+| `scratchpad_list`       | `{ projectId }`                             | `ScratchpadInfo[]`|
+| `scratchpad_add`        | `{ projectId }`                             | `ScratchpadInfo`  |
+| `scratchpad_update_content` | `{ projectId, id, content }`            | `ScratchpadInfo`  |
+| `scratchpad_update_title`   | `{ projectId, id, title }`              | `ScratchpadInfo`  |
 
 `NewProcess` is `{ name, command?, cwd?, kind, adapter?, restartPolicy? }`
 (`kind` is serde-flattened). `cwd` is **relative to the project root**; the

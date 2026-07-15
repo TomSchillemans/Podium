@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use podium_core::mcp::tools::{
-    AddTodoLinkParams, AddTodoParams, AssignTodoParams, CommentTodoParams, GetProcessOutputParams,
-    ListTodosParams, PodiumTools, RenameSessionParams, SpawnAgentParams, UpdateTodoParams,
+    AddTodoLinkParams, AddTodoParams, AssignTodoParams, CommentTodoParams, CreateScratchpadParams,
+    GetProcessOutputParams, ListScratchpadsParams, ListTodosParams, PodiumTools,
+    RenameSessionParams, SpawnAgentParams, UpdateScratchpadParams, UpdateTodoParams,
 };
 use podium_core::mcp::{self, McpServer};
 use podium_core::{
@@ -33,13 +34,28 @@ async fn start_server(config_dir: std::path::PathBuf) -> (Arc<Orchestrator>, Mcp
 
 /// One raw HTTP/1.1 POST to `<base_url>/mcp`; returns (status, full response).
 async fn http_post_mcp(base_url: &str, token: Option<&str>, body: &str) -> (u16, String) {
+    http_post_mcp_with_session(base_url, token, None, body).await
+}
+
+/// Like [`http_post_mcp`], but able to carry an `Mcp-Session-Id` header (the
+/// streamable-HTTP transport ties `tools/list`/`tools/call` to the session
+/// opened by `initialize`).
+async fn http_post_mcp_with_session(
+    base_url: &str,
+    token: Option<&str>,
+    session_id: Option<&str>,
+    body: &str,
+) -> (u16, String) {
     let addr = base_url.strip_prefix("http://").expect("http url");
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let auth = token
         .map(|t| format!("Authorization: Bearer {t}\r\n"))
         .unwrap_or_default();
+    let session = session_id
+        .map(|s| format!("Mcp-Session-Id: {s}\r\n"))
+        .unwrap_or_default();
     let request = format!(
-        "POST /mcp HTTP/1.1\r\nHost: {addr}\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\n{auth}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST /mcp HTTP/1.1\r\nHost: {addr}\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\n{auth}{session}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     stream
@@ -58,6 +74,46 @@ async fn http_post_mcp(base_url: &str, token: Option<&str>, body: &str) -> (u16,
         .and_then(|s| s.parse().ok())
         .expect("status line");
     (status, text)
+}
+
+/// Pull the `Mcp-Session-Id` response header out of a raw HTTP response
+/// (case-insensitive header name, as HTTP requires).
+fn extract_session_id(response: &str) -> String {
+    response
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.trim().eq_ignore_ascii_case("mcp-session-id") {
+                Some(value.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .expect("Mcp-Session-Id response header present")
+}
+
+/// The JSON-RPC payload of a raw HTTP response. The server answers either
+/// `application/json` (a plain body) or `text/event-stream` (one `data: `
+/// line per SSE event, chunked-encoded) — either way, the payload we want is
+/// the first `{...}` JSON object in the response.
+fn extract_json_body(response: &str) -> serde_json::Value {
+    let start = response.find('{').expect("json object in body");
+    let mut depth = 0usize;
+    let mut end = start;
+    for (i, c) in response[start..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = start + i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    serde_json::from_str(&response[start..end]).expect("valid json body")
 }
 
 /// Text of the first content block of a tool result (shape-agnostic).
@@ -149,6 +205,56 @@ async fn initialize_succeeds_with_the_bearer_token() {
         response.contains("protocolVersion"),
         "initialize result returned: {response}"
     );
+    server.stop();
+}
+
+const INITIALIZED: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+
+fn tools_list_request(id: u64) -> String {
+    format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/list"}}"#)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tools_list_includes_scratchpad_tools() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_orch, server) = start_server(dir.path().join("mcp")).await;
+
+    let (status, init_response) =
+        http_post_mcp(server.url(), Some(server.token()), INITIALIZE).await;
+    assert_eq!(status, 200);
+    let session_id = extract_session_id(&init_response);
+
+    let (status, _) = http_post_mcp_with_session(
+        server.url(),
+        Some(server.token()),
+        Some(&session_id),
+        INITIALIZED,
+    )
+    .await;
+    assert_eq!(status, 202, "initialized notification accepted");
+
+    let (status, list_response) = http_post_mcp_with_session(
+        server.url(),
+        Some(server.token()),
+        Some(&session_id),
+        &tools_list_request(2),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let body = extract_json_body(&list_response);
+    let tools = body["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect::<Vec<_>>();
+    for name in ["list_scratchpads", "create_scratchpad", "update_scratchpad"] {
+        assert!(
+            tools.contains(&name),
+            "{name} missing from tools/list: {tools:?}"
+        );
+    }
+
     server.stop();
 }
 
@@ -283,6 +389,100 @@ async fn todo_tools_update_and_comment_round_trip() {
     assert!(listed.contains("handler stubbed out"), "{listed:?}");
     assert!(listed.contains("claude"), "{listed:?}");
     assert!(listed.contains("#42 Fix login"), "{listed:?}");
+
+    orch.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_scratchpad_round_trip_via_mcp() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let orch = Arc::new(Orchestrator::new());
+    let project_id = orch
+        .open_project(dir.path().to_path_buf())
+        .await
+        .expect("open project");
+    let tools = PodiumTools::new(Arc::clone(&orch));
+
+    let created = tools
+        .create_scratchpad(Parameters(CreateScratchpadParams {
+            project_id: project_id.to_string(),
+            author: None,
+        }))
+        .await
+        .expect("create_scratchpad");
+    let created_json: serde_json::Value =
+        serde_json::from_str(&first_text(&created)).expect("scratchpad json");
+    assert_eq!(created_json["projectId"], project_id.to_string());
+    assert_eq!(created_json["content"], "");
+    let scratchpad_id = created_json["id"]
+        .as_str()
+        .expect("scratchpad id")
+        .to_string();
+
+    let updated = tools
+        .update_scratchpad(Parameters(UpdateScratchpadParams {
+            project_id: project_id.to_string(),
+            id: scratchpad_id.clone(),
+            content: "meeting notes".to_string(),
+            author: None,
+        }))
+        .await
+        .expect("update_scratchpad");
+    let updated_text = first_text(&updated);
+    assert!(updated_text.contains("meeting notes"), "{updated_text:?}");
+    assert!(
+        updated_text.contains("\"updatedBy\": \"agent\""),
+        "{updated_text:?}"
+    );
+
+    // An explicit author overrides the "agent" default.
+    let renamed_author = tools
+        .update_scratchpad(Parameters(UpdateScratchpadParams {
+            project_id: project_id.to_string(),
+            id: scratchpad_id,
+            content: "meeting notes v2".to_string(),
+            author: Some("claude-code".to_string()),
+        }))
+        .await
+        .expect("update_scratchpad with explicit author");
+    let renamed_text = first_text(&renamed_author);
+    assert!(
+        renamed_text.contains("\"updatedBy\": \"claude-code\""),
+        "{renamed_text:?}"
+    );
+
+    orch.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_scratchpads_round_trip_via_mcp() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let orch = Arc::new(Orchestrator::new());
+    let project_id = orch
+        .open_project(dir.path().to_path_buf())
+        .await
+        .expect("open project");
+    let tools = PodiumTools::new(Arc::clone(&orch));
+
+    tools
+        .create_scratchpad(Parameters(CreateScratchpadParams {
+            project_id: project_id.to_string(),
+            author: None,
+        }))
+        .await
+        .expect("create_scratchpad");
+
+    let listed = tools
+        .list_scratchpads(Parameters(ListScratchpadsParams {
+            project_id: project_id.to_string(),
+        }))
+        .await
+        .expect("list_scratchpads");
+    let listed_json: serde_json::Value =
+        serde_json::from_str(&first_text(&listed)).expect("scratchpad list json");
+    let items = listed_json.as_array().expect("array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["projectId"], project_id.to_string());
 
     orch.shutdown().await;
 }

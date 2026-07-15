@@ -15,6 +15,7 @@ export type ProcessId = string;
 export type TodoId = string;
 export type CommentId = string;
 export type LinkId = string;
+export type ScratchpadId = string;
 
 /** Open project snapshot (`podium_core::ProjectInfo`). */
 export interface ProjectInfo {
@@ -245,6 +246,27 @@ export interface TodoInfo {
   comments: TodoComment[];
   /** The agent currently working on this to-do, or `null` if unassigned. */
   assignedAgent: AssignedAgent | null;
+}
+
+/**
+ * One scratchpad (`podium_core::ScratchpadInfo`). Scratchpads are keyed by
+ * project root on the Rust side, so they survive app restarts.
+ */
+export interface ScratchpadInfo {
+  id: ScratchpadId;
+  projectId: ProjectId;
+  title: string;
+  content: string;
+  /** Always `false` for now — archiving lands in a later phase. */
+  archived: boolean;
+  /** RFC 3339 creation timestamp. */
+  createdAt: string;
+  /** RFC 3339 timestamp of the last edit. */
+  updatedAt: string;
+  /** Who last touched the content: `"User"` or an agent name. */
+  updatedBy: string;
+  /** Increments on every content update, starting at 1. */
+  version: number;
 }
 
 /** Structured error every IPC command can reject with (`IpcError`). */

@@ -13,12 +13,19 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { ProcessInfo, ProjectId, ProjectInfo, TodoId } from "../ipc/types";
+import type {
+  ProcessInfo,
+  ProjectId,
+  ProjectInfo,
+  ScratchpadId,
+  TodoId,
+} from "../ipc/types";
 import { useLayoutStore } from "../state/layoutStore";
 import { useProcessStore } from "../state/processStore";
 import { useProjectStore } from "../state/projectStore";
 import { NewAgentModal } from "./NewAgentModal";
 import { ProcessRow } from "./ProcessRow";
+import { ScratchpadSubsection } from "./ScratchpadSubsection";
 import { TodoSubsection } from "./TodoSubsection";
 import {
   AddIcon,
@@ -87,6 +94,7 @@ interface ProjectGroupProps {
     todoIds: TodoId[],
     initialName: string,
   ) => void;
+  onOpenScratchpad: (projectId: ProjectId, scratchpadId: ScratchpadId) => void;
   /** Drag-to-reorder wiring, owned by the Sidebar (tracks the drop target). */
   dragging: boolean;
   dropTarget: boolean;
@@ -103,6 +111,7 @@ function ProjectGroup({
   onNewAgent,
   onOpenTodo,
   onPickAgent,
+  onOpenScratchpad,
   dragging,
   dropTarget,
   onDragStart,
@@ -315,6 +324,10 @@ function ProjectGroup({
             onOpenTodo={onOpenTodo}
             onPickAgent={onPickAgent}
           />
+          <ScratchpadSubsection
+            projectId={project.id}
+            onOpenScratchpad={onOpenScratchpad}
+          />
           <Subsection
             title="Agents"
             Icon={AgentIcon}
@@ -355,6 +368,9 @@ export function Sidebar() {
   const [agentModal, setAgentModal] = useState<AgentModalTarget | null>(null);
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
   const openTodoInWorkArea = useLayoutStore((s) => s.openTodoInWorkArea);
+  const openScratchpadInWorkArea = useLayoutStore(
+    (s) => s.openScratchpadInWorkArea,
+  );
 
   const projects = useProjectStore((s) => s.projects);
   const openProjectDialog = useProjectStore((s) => s.openProjectDialog);
@@ -408,6 +424,7 @@ export function Sidebar() {
               onPickAgent={(projectId, todoIds, initialName) =>
                 setAgentModal({ projectId, todoIds, initialName })
               }
+              onOpenScratchpad={openScratchpadInWorkArea}
             />
           ))
         ) : (

@@ -20,6 +20,7 @@ import {
   Link,
   ListTodo,
   MessageSquare,
+  NotebookPen,
   SquareTerminal,
   Play,
   Square,
@@ -67,6 +68,7 @@ function icon(Glyph: LucideIcon, defaults?: Partial<LucideProps>) {
 export const AgentIcon = icon(Bot);
 export const TerminalIcon = icon(SquareTerminal);
 export const TodoIcon = icon(ListTodo);
+export const ScratchpadIcon = icon(NotebookPen);
 export const FolderIcon = icon(Folder);
 export const FolderOpenIcon = icon(FolderOpen);
 

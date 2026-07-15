@@ -1,4 +1,4 @@
-//! The 16 MCP tools Podium exposes to agents — all thin calls into
+//! The 19 MCP tools Podium exposes to agents — all thin calls into
 //! [`Orchestrator`], returning JSON (or plain text for output tails).
 
 use std::str::FromStr;
@@ -12,7 +12,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::error::CoreError;
-use crate::ids::{ProcessId, ProjectId, TodoId};
+use crate::ids::{ProcessId, ProjectId, ScratchpadId, TodoId};
 use crate::orchestrator::Orchestrator;
 
 /// Default number of trailing lines returned by `get_process_output`.
@@ -141,6 +141,32 @@ pub struct SpawnAgentParams {
     /// combined task. Seeds the prompt with each to-do plus the standing
     /// instructions to keep them current over MCP.
     pub todo_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListScratchpadsParams {
+    /// Project UUID whose scratchpads to list.
+    pub project_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateScratchpadParams {
+    /// Project UUID the scratchpad belongs to.
+    pub project_id: String,
+    /// Who is creating the scratchpad (defaults to `agent`).
+    pub author: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UpdateScratchpadParams {
+    /// Project UUID the scratchpad belongs to.
+    pub project_id: String,
+    /// Scratchpad UUID (from `list_scratchpads`).
+    pub id: String,
+    /// The new full content of the scratchpad.
+    pub content: String,
+    /// Who is making the edit (defaults to `agent`).
+    pub author: Option<String>,
 }
 
 /// The MCP tool surface. One instance is created per HTTP session; all state
@@ -404,6 +430,55 @@ impl PodiumTools {
         )
     }
 
+    #[tool(description = "List a project's active (non-archived) scratchpads.")]
+    pub async fn list_scratchpads(
+        &self,
+        Parameters(p): Parameters<ListScratchpadsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let project_id = parse_project_id(&p.project_id)?;
+        json_result(
+            &self
+                .orchestrator
+                .list_scratchpads(project_id)
+                .map_err(core_error)?,
+        )
+    }
+
+    #[tool(
+        description = "Create a new scratchpad in a project (auto-generated timestamp title, empty content). Returns the created scratchpad."
+    )]
+    pub async fn create_scratchpad(
+        &self,
+        Parameters(p): Parameters<CreateScratchpadParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let project_id = parse_project_id(&p.project_id)?;
+        let author = p.author.as_deref().unwrap_or("agent");
+        json_result(
+            &self
+                .orchestrator
+                .add_scratchpad(project_id, author)
+                .map_err(core_error)?,
+        )
+    }
+
+    #[tool(
+        description = "Replace a scratchpad's content (bumps its version). Returns the updated scratchpad."
+    )]
+    pub async fn update_scratchpad(
+        &self,
+        Parameters(p): Parameters<UpdateScratchpadParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let project_id = parse_project_id(&p.project_id)?;
+        let id = parse_scratchpad_id(&p.id)?;
+        let author = p.author.as_deref().unwrap_or("agent");
+        json_result(
+            &self
+                .orchestrator
+                .update_scratchpad_content(project_id, id, &p.content, author)
+                .map_err(core_error)?,
+        )
+    }
+
     fn find_process(&self, id: ProcessId) -> Result<crate::process::ProcessInfo, McpError> {
         self.orchestrator
             .list_processes(None)
@@ -441,7 +516,10 @@ impl ServerHandler for PodiumTools {
              session recognisable: call rename_session (with your own \
              PODIUM_PROCESS_ID) to give yourself a short name describing what the \
              session is about — if you were started standalone rather than on a \
-             to-do, do this right after the user's first prompt."
+             to-do, do this right after the user's first prompt. Each project \
+             also has shared scratchpads for freeform notes \
+             (list_scratchpads/create_scratchpad/update_scratchpad), visible \
+             to the user and every agent."
                 .to_string(),
         );
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
@@ -471,6 +549,11 @@ fn parse_process_id(s: &str) -> Result<ProcessId, McpError> {
 
 fn parse_todo_id(s: &str) -> Result<TodoId, McpError> {
     TodoId::from_str(s).map_err(|_| McpError::invalid_params(format!("invalid todo_id: {s}"), None))
+}
+
+fn parse_scratchpad_id(s: &str) -> Result<ScratchpadId, McpError> {
+    ScratchpadId::from_str(s)
+        .map_err(|_| McpError::invalid_params(format!("invalid scratchpad id: {s}"), None))
 }
 
 /// Map a [`CoreError`] onto MCP error codes. Every message is Podium-owned
