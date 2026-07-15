@@ -25,6 +25,11 @@ import { useEffect, useRef, useState } from "react";
 
 import type { ProjectId, ScratchpadId, ScratchpadInfo } from "../ipc/types";
 import { formatUpdatedAt } from "../lib/dateFormat";
+import {
+  type Heading,
+  scrollToHeading,
+  useHeadings,
+} from "../lib/tiptapHeadings";
 import { useLayoutStore } from "../state/layoutStore";
 import { useScratchpadStore } from "../state/scratchpadStore";
 import {
@@ -36,6 +41,7 @@ import {
 } from "./icons";
 import styles from "./ScratchpadDetailPane.module.css";
 import { ScratchpadEditor } from "./ScratchpadEditor";
+import { ScratchpadTOC } from "./ScratchpadTOC";
 import { ScratchpadToolbar } from "./ScratchpadToolbar";
 import { TagChip } from "./TagChip";
 
@@ -73,6 +79,11 @@ export function ScratchpadDetailPane({
   const [conflict, setConflict] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  // "On this page" outline of the current document's H2/H3 headings — keyed
+  // off the live `editor` instance, so it starts empty until the editor is
+  // ready and resets automatically on every remount (App keys this pane by
+  // scratchpad id, giving each scratchpad a fresh `Editor`).
+  const headings = useHeadings(editor);
   // The last value we know is in sync with the store (either what we last
   // saved, or the last value pulled in from it) — comparing against this
   // (rather than the live state) is what lets an external refresh update the
@@ -218,6 +229,11 @@ export function ScratchpadDetailPane({
 
   // Discard the local edit and adopt the latest content/title from the
   // store (the conflict handler already triggered a `refresh`).
+  const handleSelectHeading = (heading: Heading) => {
+    if (!editor) return;
+    scrollToHeading(editor, heading.pos);
+  };
+
   const reloadFromServer = () => {
     setContent(scratchpad.content);
     setTitle(scratchpad.title);
@@ -356,11 +372,14 @@ export function ScratchpadDetailPane({
       <ScratchpadToolbar editor={editor} />
 
       <div className={styles.body}>
-        <ScratchpadEditor
-          content={content}
-          onChange={handleContentChange}
-          onEditorReady={setEditor}
-        />
+        <div className={styles.editorArea}>
+          <ScratchpadEditor
+            content={content}
+            onChange={handleContentChange}
+            onEditorReady={setEditor}
+          />
+        </div>
+        <ScratchpadTOC headings={headings} onSelectHeading={handleSelectHeading} />
       </div>
 
       <footer className={styles.footer}>

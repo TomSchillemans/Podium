@@ -108,15 +108,26 @@
   background: var(--surface-active, var(--surface-hover));
 }
 
+/* Horizontal row: editor area + TOC panel. Its own overflow stays hidden —
+   each side panel owns its own scroll (see `.editorArea`/`ScratchpadTOC`)
+   so scrolling the editor doesn't drag the TOC out of view and 30+ headings
+   don't grow the whole pane. */
 .body {
   flex: 1;
   min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.editorArea {
+  flex: 1;
+  min-width: 0;
   display: flex;
   padding: var(--sp-4);
   overflow: auto;
 }
 
-.body :global(.scratchpad-editor-content-wrapper) {
+.editorArea :global(.scratchpad-editor-content-wrapper) {
   display: flex;
   flex: 1;
   min-height: 100%;
