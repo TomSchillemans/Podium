@@ -5,6 +5,15 @@
   flex-direction: column;
 }
 
+/* Fullscreen: covers the whole work area, reversibly (no layout changes
+   elsewhere — just an overlay above everything else in the window). */
+.pane[data-fullscreen] {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+}
+
 /* Header mirrors the to-do/terminal panes: kind icon, title, close. */
 .header {
   display: flex;
@@ -42,7 +51,8 @@
   box-shadow: none;
 }
 
-.closeBtn {
+.closeBtn,
+.expandBtn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -60,7 +70,8 @@
     color var(--dur-1) var(--ease-out);
 }
 
-.closeBtn:hover {
+.closeBtn:hover,
+.expandBtn:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
@@ -102,13 +113,22 @@
   min-height: 0;
   display: flex;
   padding: var(--sp-4);
+  overflow: auto;
 }
 
-.content {
+.body :global(.scratchpad-editor-content-wrapper) {
+  display: flex;
   flex: 1;
-  min-height: 0;
+  min-height: 100%;
+}
+
+/* The Tiptap `EditorContent` wrapper + its contentEditable child (global
+   selectors: Tiptap owns the inner DOM, so these can't be CSS-module-scoped
+   class names on the ProseMirror-rendered elements themselves). */
+.body :global(.tiptap.ProseMirror) {
+  flex: 1;
+  min-height: 100%;
   width: 100%;
-  resize: none;
   font-family: inherit;
   font-size: var(--fs-md);
   color: var(--text);
@@ -122,13 +142,17 @@
     box-shadow var(--dur-1) var(--ease-out);
 }
 
-.content:focus {
+.body :global(.tiptap.ProseMirror:focus) {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
-.content::placeholder {
+.body :global(.tiptap.ProseMirror p.is-editor-empty:first-child::before) {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
   color: var(--text-faint);
 }
 
