@@ -246,6 +246,29 @@ describe("ScratchpadDetailPane", () => {
     expect(clearOpenScratchpad).toHaveBeenCalled();
   });
 
+  it("renders the Tiptap editor and toolbar, not the old plain textarea", () => {
+    seed();
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    expect(screen.getByTestId("scratchpad-toolbar")).toBeInTheDocument();
+    expect(screen.getByLabelText("Scratchpad content")).toBeInTheDocument();
+  });
+
+  it("toggles fullscreen on and off", () => {
+    seed();
+    render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Fullscreen"));
+    expect(screen.getByLabelText("Exit fullscreen")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Exit fullscreen"));
+    expect(screen.getByLabelText("Fullscreen")).toBeInTheDocument();
+  });
+
   it("closes the pane via the close button", () => {
     const clearOpenScratchpad = vi.fn();
     seed();

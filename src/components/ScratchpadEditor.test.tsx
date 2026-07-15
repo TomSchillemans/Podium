@@ -5,9 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { SCRATCHPAD_PLACEHOLDER, ScratchpadEditor } from "./ScratchpadEditor";
 
 /**
- * Drives the real Tiptap/ProseMirror editor in jsdom. jsdom lacks a few DOM
- * APIs ProseMirror probes at startup (range client rects, etc.) — shimmed in
- * `src/test/setup.ts`.
+ * Drives the real Tiptap/ProseMirror editor in jsdom (no extra shims are
+ * needed — jsdom + the current ProseMirror/Tiptap versions run cleanly here).
  */
 
 function waitForEditor(onEditorReady: ReturnType<typeof vi.fn>) {
