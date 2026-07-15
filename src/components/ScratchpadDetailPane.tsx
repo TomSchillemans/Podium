@@ -1,28 +1,42 @@
 /**
  * Work-area pane for an opened scratchpad: a header with an inline-editable
- * title, an archive button, and a close button, over a tag row and a plain
- * content textarea (Tiptap rich text lands in Phase 2) with debounced
- * autosave, and a footer showing when it was last touched. Scratchpads are
- * shared with agents over MCP, so the pane reads the live scratchpad from
- * the store by id and reflects `scratchpad:changed` refreshes while open —
- * external edits are only adopted when there is no unsaved local change
- * pending, so an agent's edit never clobbers text the user is mid-typing.
+ * title, tag chips, an archive button, and a close button, over a formatting
+ * toolbar plus fullscreen toggle and a Tiptap WYSIWYG markdown editor
+ * (`ScratchpadEditor` — the persisted value is always plain markdown, Tiptap
+ * is purely a view-layer concern) with debounced autosave, and a footer
+ * showing when it was last touched. Scratchpads are shared with agents over
+ * MCP, so the pane reads the live scratchpad from the store by id and
+ * reflects `scratchpad:changed` refreshes while open — external edits are
+ * only adopted when there is no unsaved local change pending, so an agent's
+ * edit never clobbers text the user is mid-typing.
  *
  * Content/title saves carry the scratchpad's last-known `updatedAt`; if a
  * concurrent edit (the user in another window, or an agent) landed first,
  * the save is rejected as a conflict instead of silently overwriting it —
  * an in-pane banner then offers "Reload" (discard the local edit, adopt the
- * latest) or "Force save" (retry with the fresh timestamp).
+ * latest) or "Force save" (retry with the fresh timestamp). The toolbar and
+ * editor stay mounted (and editable) while the banner is up — the adoption
+ * effects below are frozen instead, so the user keeps typing against their
+ * own draft until they explicitly choose Reload or Force Save.
  */
 
+import type { Editor } from "@tiptap/react";
 import { useEffect, useRef, useState } from "react";
 
 import type { ProjectId, ScratchpadId, ScratchpadInfo } from "../ipc/types";
 import { formatUpdatedAt } from "../lib/dateFormat";
 import { useLayoutStore } from "../state/layoutStore";
 import { useScratchpadStore } from "../state/scratchpadStore";
-import { ArchiveIcon, CloseIcon, ScratchpadIcon } from "./icons";
+import {
+  ArchiveIcon,
+  CloseIcon,
+  CollapseIcon,
+  ExpandIcon,
+  ScratchpadIcon,
+} from "./icons";
 import styles from "./ScratchpadDetailPane.module.css";
+import { ScratchpadEditor } from "./ScratchpadEditor";
+import { ScratchpadToolbar } from "./ScratchpadToolbar";
 import { TagChip } from "./TagChip";
 
 const NO_SCRATCHPADS: ScratchpadInfo[] = [];
@@ -57,6 +71,8 @@ export function ScratchpadDetailPane({
   // Whether the last save attempt was rejected as a conflict (someone else
   // edited the scratchpad first) — shows the reload/force-save banner.
   const [conflict, setConflict] = useState(false);
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
   // The last value we know is in sync with the store (either what we last
   // saved, or the last value pulled in from it) — comparing against this
   // (rather than the live state) is what lets an external refresh update the
@@ -268,7 +284,7 @@ export function ScratchpadDetailPane({
   };
 
   return (
-    <div className={styles.pane}>
+    <div className={styles.pane} data-fullscreen={fullscreen || undefined}>
       <header className={styles.header}>
         <ScratchpadIcon className={styles.kindIcon} />
         <input
@@ -284,6 +300,15 @@ export function ScratchpadDetailPane({
             }
           }}
         />
+        <button
+          type="button"
+          className={styles.expandBtn}
+          aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+          title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+          onClick={() => setFullscreen((f) => !f)}
+        >
+          {fullscreen ? <CollapseIcon /> : <ExpandIcon />}
+        </button>
         <button
           type="button"
           className={styles.closeBtn}
@@ -328,13 +353,13 @@ export function ScratchpadDetailPane({
         </div>
       )}
 
+      <ScratchpadToolbar editor={editor} />
+
       <div className={styles.body}>
-        <textarea
-          className={styles.content}
-          value={content}
-          aria-label="Scratchpad content"
-          placeholder="Click to type. Notes, research, or handoff details. Markdown supported."
-          onChange={(e) => handleContentChange(e.target.value)}
+        <ScratchpadEditor
+          content={content}
+          onChange={handleContentChange}
+          onEditorReady={setEditor}
         />
       </div>
 

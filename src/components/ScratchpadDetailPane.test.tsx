@@ -9,6 +9,36 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
+// Stand in for the real Tiptap editor with a plain textarea — the pane's
+// autosave/flush/reconciliation logic only cares about a `content` string
+// and an `onChange(markdown)` callback, and driving a real ProseMirror
+// contentEditable isn't feasible with `fireEvent`. The real editor's own
+// rendering/round-trip/reconciliation behaviour is covered in
+// `ScratchpadEditor.test.tsx`.
+vi.mock("./ScratchpadEditor", () => ({
+  SCRATCHPAD_PLACEHOLDER:
+    "Click to type. Notes, research, or handoff details. Markdown supported.",
+  ScratchpadEditor: ({
+    content,
+    onChange,
+  }: {
+    content: string;
+    onChange: (markdown: string) => void;
+    onEditorReady?: (editor: unknown) => void;
+  }) => (
+    <textarea
+      aria-label="Scratchpad content"
+      placeholder="Click to type. Notes, research, or handoff details. Markdown supported."
+      value={content}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}));
+
+vi.mock("./ScratchpadToolbar", () => ({
+  ScratchpadToolbar: () => <div data-testid="scratchpad-toolbar" />,
+}));
+
 import type { ScratchpadInfo } from "../ipc/types";
 import { useLayoutStore } from "../state/layoutStore";
 import { useScratchpadStore } from "../state/scratchpadStore";
