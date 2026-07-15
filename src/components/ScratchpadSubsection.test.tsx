@@ -34,7 +34,9 @@ function scratchpad(id: string, title: string): ScratchpadInfo {
 /** Seed the scratchpad store with a list and spy-able mutation actions. */
 function seed(scratchpads: ScratchpadInfo[]) {
   const refresh = vi.fn(() => Promise.resolve());
-  const addScratchpad = vi.fn(() => Promise.resolve(scratchpad("new-1", "Untitled")));
+  const addScratchpad = vi.fn(() =>
+    Promise.resolve(scratchpad("new-1", "Untitled")),
+  );
   useScratchpadStore.setState(
     {
       ...initialScratchpad,
@@ -53,15 +55,9 @@ describe("ScratchpadSubsection", () => {
   });
 
   it("renders_scratchpad_list_for_project", () => {
-    seed([
-      scratchpad("a", "Scratchpad A"),
-      scratchpad("b", "Scratchpad B"),
-    ]);
+    seed([scratchpad("a", "Scratchpad A"), scratchpad("b", "Scratchpad B")]);
     render(
-      <ScratchpadSubsection
-        projectId={PROJECT}
-        onOpenScratchpad={vi.fn()}
-      />,
+      <ScratchpadSubsection projectId={PROJECT} onOpenScratchpad={vi.fn()} />,
     );
 
     expect(screen.getByText("Scratchpad A")).toBeInTheDocument();
@@ -103,10 +99,7 @@ describe("ScratchpadSubsection", () => {
   it("shows the empty hint when there are no scratchpads", () => {
     seed([]);
     render(
-      <ScratchpadSubsection
-        projectId={PROJECT}
-        onOpenScratchpad={vi.fn()}
-      />,
+      <ScratchpadSubsection projectId={PROJECT} onOpenScratchpad={vi.fn()} />,
     );
 
     expect(screen.getByText("No scratchpads yet.")).toBeInTheDocument();
