@@ -3,14 +3,17 @@
  * shared with agents over MCP (title only here; content editing happens in
  * the detail pane). The header "+" immediately creates a new scratchpad
  * (auto-titled) and opens it in the detail pane, since there is no text to
- * capture up front (unlike a to-do). Clicking a row opens that scratchpad.
+ * capture up front (unlike a to-do). Clicking a row opens that scratchpad; a
+ * hover-revealed archive button hides it from this list (see the Archive
+ * modal, opened from the header).
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import type { ProjectId, ScratchpadId, ScratchpadInfo } from "../ipc/types";
 import { useScratchpadStore } from "../state/scratchpadStore";
-import { AddIcon, ScratchpadIcon } from "./icons";
+import { AddIcon, ArchiveIcon, ScratchpadIcon } from "./icons";
+import { ScratchpadArchiveModal } from "./ScratchpadArchiveModal";
 import sidebarStyles from "./Sidebar.module.css";
 import styles from "./TodoSubsection.module.css";
 
@@ -32,6 +35,11 @@ export function ScratchpadSubsection({
   );
   const refresh = useScratchpadStore((s) => s.refresh);
   const addScratchpad = useScratchpadStore((s) => s.addScratchpad);
+  const setScratchpadArchived = useScratchpadStore(
+    (s) => s.setScratchpadArchived,
+  );
+
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   // Initial pull; later changes arrive via the `scratchpad:changed` refresh.
   useEffect(() => {
@@ -48,6 +56,15 @@ export function ScratchpadSubsection({
       <div className={sidebarStyles.sectionHeader}>
         <ScratchpadIcon className={sidebarStyles.panelIcon} />
         <span className={sidebarStyles.panelTitle}>Scratchpads</span>
+        <button
+          type="button"
+          className={sidebarStyles.addBtn}
+          aria-label="View archived scratchpads"
+          title="Archived scratchpads"
+          onClick={() => setArchiveOpen(true)}
+        >
+          <ArchiveIcon size={13} />
+        </button>
         <button
           type="button"
           className={sidebarStyles.addBtn}
@@ -71,6 +88,17 @@ export function ScratchpadSubsection({
                 >
                   <span className={styles.text}>{sp.title}</span>
                 </button>
+                <button
+                  type="button"
+                  className={styles.action}
+                  aria-label={`Archive scratchpad "${sp.title}"`}
+                  title="Archive scratchpad"
+                  onClick={() =>
+                    void setScratchpadArchived(projectId, sp.id, true)
+                  }
+                >
+                  <ArchiveIcon size={13} />
+                </button>
               </div>
             </div>
           ))}
@@ -78,6 +106,11 @@ export function ScratchpadSubsection({
       ) : (
         <div className={sidebarStyles.placeholder}>No scratchpads yet.</div>
       )}
+      <ScratchpadArchiveModal
+        open={archiveOpen}
+        projectId={projectId}
+        onClose={() => setArchiveOpen(false)}
+      />
     </div>
   );
 }

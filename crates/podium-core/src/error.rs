@@ -26,6 +26,9 @@ pub enum CoreError {
     #[error("scratchpad not found")]
     ScratchpadNotFound,
 
+    #[error("scratchpad conflict: it was updated by someone else since you last loaded it")]
+    ScratchpadConflict,
+
     #[error("process is already running")]
     ProcessAlreadyRunning,
 

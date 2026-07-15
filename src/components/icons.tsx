@@ -41,6 +41,7 @@ import {
   CircleCheck,
   Info,
   Pencil,
+  Tag,
   Trash2,
   GripVertical,
   type LucideIcon,
@@ -87,6 +88,7 @@ export const LinkIcon = icon(Link, { size: 13 });
 export const ArchiveIcon = icon(Archive, { size: 13 });
 export const UnarchiveIcon = icon(ArchiveRestore, { size: 13 });
 export const EditIcon = icon(Pencil, { size: 13 });
+export const TagIcon = icon(Tag, { size: 12 });
 export const DeleteIcon = icon(Trash2, { size: 13 });
 export const GripIcon = icon(GripVertical, { size: 14 });
 

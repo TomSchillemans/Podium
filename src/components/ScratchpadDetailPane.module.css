@@ -65,6 +65,38 @@
   color: var(--text);
 }
 
+.conflictBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: color-mix(in srgb, var(--danger, #d9534f) 12%, transparent);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.conflictActions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.conflictActions button {
+  font-size: var(--fs-sm);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.conflictActions button:hover {
+  background: var(--surface-active, var(--surface-hover));
+}
+
 .body {
   flex: 1;
   min-height: 0;

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tokio::sync::broadcast;
 
@@ -684,6 +684,15 @@ impl Orchestrator {
         Ok(self.scratchpads.list(project_id, &root))
     }
 
+    /// List a project's archived scratchpads, most recently archived first.
+    pub fn list_archived_scratchpads(
+        &self,
+        project_id: ProjectId,
+    ) -> CoreResult<Vec<ScratchpadInfo>> {
+        let root = self.project_root(project_id)?;
+        Ok(self.scratchpads.list_archived(project_id, &root))
+    }
+
     /// Create a new scratchpad in a project (auto-generated timestamp title,
     /// empty content).
     pub fn add_scratchpad(
@@ -708,35 +717,96 @@ impl Orchestrator {
         Ok(self.scratchpads.get(project_id, &root, id))
     }
 
-    /// Replace a scratchpad's content (bumps its version).
+    /// Replace a scratchpad's content (bumps its version). `expected_updated_at`
+    /// must match the scratchpad's current `updated_at` or the call fails
+    /// with [`CoreError::ScratchpadConflict`] (a concurrent edit landed
+    /// first).
     pub fn update_scratchpad_content(
         &self,
         project_id: ProjectId,
         id: ScratchpadId,
         content: &str,
+        expected_updated_at: DateTime<Utc>,
         updated_by: &str,
     ) -> CoreResult<ScratchpadInfo> {
         let root = self.project_root(project_id)?;
-        let info = self
-            .scratchpads
-            .update_content(project_id, &root, id, content, updated_by)?;
+        let info = self.scratchpads.update_content(
+            project_id,
+            &root,
+            id,
+            content,
+            expected_updated_at,
+            updated_by,
+        )?;
         self.events
             .publish(PodiumEvent::ScratchpadsChanged { project_id });
         Ok(info)
     }
 
     /// Revise a scratchpad's title (blank falls back to a timestamp title).
+    /// `expected_updated_at` is checked the same way as in
+    /// [`Self::update_scratchpad_content`].
     pub fn update_scratchpad_title(
         &self,
         project_id: ProjectId,
         id: ScratchpadId,
         title: &str,
+        expected_updated_at: DateTime<Utc>,
         updated_by: &str,
+    ) -> CoreResult<ScratchpadInfo> {
+        let root = self.project_root(project_id)?;
+        let info = self.scratchpads.update_title(
+            project_id,
+            &root,
+            id,
+            title,
+            expected_updated_at,
+            updated_by,
+        )?;
+        self.events
+            .publish(PodiumEvent::ScratchpadsChanged { project_id });
+        Ok(info)
+    }
+
+    /// Add a free-text tag to a scratchpad (blank rejected, dedup by value).
+    pub fn add_scratchpad_tag(
+        &self,
+        project_id: ProjectId,
+        id: ScratchpadId,
+        tag: &str,
+    ) -> CoreResult<ScratchpadInfo> {
+        let root = self.project_root(project_id)?;
+        let info = self.scratchpads.add_tag(project_id, &root, id, tag)?;
+        self.events
+            .publish(PodiumEvent::ScratchpadsChanged { project_id });
+        Ok(info)
+    }
+
+    /// Remove a tag from a scratchpad by exact value (idempotent).
+    pub fn remove_scratchpad_tag(
+        &self,
+        project_id: ProjectId,
+        id: ScratchpadId,
+        tag: &str,
+    ) -> CoreResult<ScratchpadInfo> {
+        let root = self.project_root(project_id)?;
+        let info = self.scratchpads.remove_tag(project_id, &root, id, tag)?;
+        self.events
+            .publish(PodiumEvent::ScratchpadsChanged { project_id });
+        Ok(info)
+    }
+
+    /// Archive or unarchive a scratchpad.
+    pub fn set_scratchpad_archived(
+        &self,
+        project_id: ProjectId,
+        id: ScratchpadId,
+        archived: bool,
     ) -> CoreResult<ScratchpadInfo> {
         let root = self.project_root(project_id)?;
         let info = self
             .scratchpads
-            .update_title(project_id, &root, id, title, updated_by)?;
+            .set_archived(project_id, &root, id, archived)?;
         self.events
             .publish(PodiumEvent::ScratchpadsChanged { project_id });
         Ok(info)
@@ -1821,7 +1891,7 @@ mod tests {
         let mut rx = orch.subscribe_events();
 
         let updated = orch
-            .update_scratchpad_content(project_id, added.id, "hello", "claude")
+            .update_scratchpad_content(project_id, added.id, "hello", added.updated_at, "claude")
             .unwrap();
         assert_eq!(updated.content, "hello");
         assert_eq!(updated.version, 2);
@@ -1845,5 +1915,87 @@ mod tests {
         assert_eq!(listed.len(), 1);
 
         assert!(rx.try_recv().is_err(), "list must not publish an event");
+    }
+
+    /// Simulates a concurrent user + agent edit: the user's stale
+    /// `expected_updated_at` is rejected once the agent's edit has landed,
+    /// instead of silently clobbering it.
+    #[tokio::test]
+    async fn concurrent_update_with_stale_timestamp_is_a_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch = Orchestrator::new();
+        let project_id = orch.open_project(dir.path().to_path_buf()).await.unwrap();
+        let added = orch.add_scratchpad(project_id, "User").unwrap();
+
+        // The agent's edit lands first.
+        let agent_edit = orch
+            .update_scratchpad_content(
+                project_id,
+                added.id,
+                "agent wrote this",
+                added.updated_at,
+                "claude",
+            )
+            .unwrap();
+
+        // The user's UI still holds the pre-agent-edit timestamp.
+        let result = orch.update_scratchpad_content(
+            project_id,
+            added.id,
+            "user's stale edit",
+            added.updated_at,
+            "User",
+        );
+        assert!(matches!(result, Err(CoreError::ScratchpadConflict)));
+
+        // Retrying with the fresh timestamp succeeds.
+        let resolved = orch
+            .update_scratchpad_content(
+                project_id,
+                added.id,
+                "user's edit after reload",
+                agent_edit.updated_at,
+                "User",
+            )
+            .unwrap();
+        assert_eq!(resolved.content, "user's edit after reload");
+    }
+
+    #[tokio::test]
+    async fn scratchpad_tags_add_remove_and_archive_publish_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch = Orchestrator::new();
+        let project_id = orch.open_project(dir.path().to_path_buf()).await.unwrap();
+        let added = orch.add_scratchpad(project_id, "User").unwrap();
+        let mut rx = orch.subscribe_events();
+
+        let tagged = orch
+            .add_scratchpad_tag(project_id, added.id, "urgent")
+            .unwrap();
+        assert_eq!(tagged.tags, vec!["urgent".to_string()]);
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            PodiumEvent::ScratchpadsChanged { project_id: pid } if pid == project_id
+        ));
+
+        let untagged = orch
+            .remove_scratchpad_tag(project_id, added.id, "urgent")
+            .unwrap();
+        assert!(untagged.tags.is_empty());
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            PodiumEvent::ScratchpadsChanged { project_id: pid } if pid == project_id
+        ));
+
+        let archived = orch
+            .set_scratchpad_archived(project_id, added.id, true)
+            .unwrap();
+        assert!(archived.archived);
+        assert!(orch.list_scratchpads(project_id).unwrap().is_empty());
+        assert_eq!(orch.list_archived_scratchpads(project_id).unwrap().len(), 1);
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            PodiumEvent::ScratchpadsChanged { project_id: pid } if pid == project_id
+        ));
     }
 }
