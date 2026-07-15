@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The stores pull in the IPC layer; jsdom has no Tauri bridge.
@@ -122,6 +122,32 @@ describe("ScratchpadDetailPane", () => {
       <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
     );
 
+    unmount();
+
+    expect(updateContent).not.toHaveBeenCalled();
+  });
+
+  it("does not flush on unmount once the scratchpad has been removed (e.g. project closed)", () => {
+    vi.useFakeTimers();
+    const { updateContent } = seed();
+    const { unmount } = render(
+      <ScratchpadDetailPane projectId={PROJECT} scratchpadId={SCRATCHPAD} />,
+    );
+
+    // A pending edit exists...
+    fireEvent.change(screen.getByLabelText("Scratchpad content"), {
+      target: { value: "unsaved edit" },
+    });
+    expect(updateContent).not.toHaveBeenCalled();
+
+    // ...but the scratchpad vanishes from the store before the pane unmounts
+    // (e.g. the project closed): the pending save must not be flushed, since
+    // it would just fail with "not found".
+    act(() => {
+      useScratchpadStore.setState({
+        scratchpadsByProject: { [PROJECT]: [] },
+      });
+    });
     unmount();
 
     expect(updateContent).not.toHaveBeenCalled();

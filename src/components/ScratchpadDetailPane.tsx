@@ -95,8 +95,9 @@ export function ScratchpadDetailPane({
   // continuously and then immediately closes the pane would otherwise lose
   // the entire unsaved edit. Uses refs (not the closed-over `content`/props)
   // so it always saves the latest value even though this effect only runs
-  // once. Skipped if the scratchpad was removed out from under us (e.g. an
-  // agent deleted it) — saving would just fail with "not found".
+  // once. Skipped if the scratchpad was removed out from under us (e.g. the
+  // project closed) — saving would just fail with "not found"; a pending
+  // edit is lost in that case (known Phase 1 limitation).
   useEffect(() => {
     return () => {
       if (!saveTimerRef.current) return;
