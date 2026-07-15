@@ -70,7 +70,13 @@ export function ScratchpadEditor({
   // Adopt external content changes (e.g. an agent's edit arriving over MCP)
   // without clobbering in-progress local typing or resetting the cursor: only
   // push a `setContent` when the incoming markdown actually differs from
-  // what the editor would currently serialize back out.
+  // what the editor would currently serialize back out. This is deliberately
+  // a second reconciliation layer: ScratchpadDetailPane already gates
+  // whether an incoming `content` prop update happens at all (skipping it
+  // while there's an unsaved local edit pending); this effect's own
+  // markdown-equality check is what makes that adoption idempotent once it
+  // does happen — e.g. an echo of our own last save shouldn't reset the
+  // cursor even though the parent didn't filter it out.
   useEffect(() => {
     if (!editor) return;
     const current: string = editor.storage.markdown.getMarkdown();

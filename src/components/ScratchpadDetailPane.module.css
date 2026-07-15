@@ -10,7 +10,7 @@
 .pane[data-fullscreen] {
   position: fixed;
   inset: 0;
-  z-index: var(--z-modal, 100);
+  z-index: 100;
   background: var(--bg);
 }
 
