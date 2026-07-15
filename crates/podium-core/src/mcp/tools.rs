@@ -153,6 +153,8 @@ pub struct ListScratchpadsParams {
 pub struct CreateScratchpadParams {
     /// Project UUID the scratchpad belongs to.
     pub project_id: String,
+    /// Who is creating the scratchpad (defaults to `agent`).
+    pub author: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -163,6 +165,8 @@ pub struct UpdateScratchpadParams {
     pub id: String,
     /// The new full content of the scratchpad.
     pub content: String,
+    /// Who is making the edit (defaults to `agent`).
+    pub author: Option<String>,
 }
 
 /// The MCP tool surface. One instance is created per HTTP session; all state
@@ -448,10 +452,11 @@ impl PodiumTools {
         Parameters(p): Parameters<CreateScratchpadParams>,
     ) -> Result<CallToolResult, McpError> {
         let project_id = parse_project_id(&p.project_id)?;
+        let author = p.author.as_deref().unwrap_or("agent");
         json_result(
             &self
                 .orchestrator
-                .add_scratchpad(project_id, "agent")
+                .add_scratchpad(project_id, author)
                 .map_err(core_error)?,
         )
     }
@@ -465,10 +470,11 @@ impl PodiumTools {
     ) -> Result<CallToolResult, McpError> {
         let project_id = parse_project_id(&p.project_id)?;
         let id = parse_scratchpad_id(&p.id)?;
+        let author = p.author.as_deref().unwrap_or("agent");
         json_result(
             &self
                 .orchestrator
-                .update_scratchpad_content(project_id, id, &p.content, "agent")
+                .update_scratchpad_content(project_id, id, &p.content, author)
                 .map_err(core_error)?,
         )
     }

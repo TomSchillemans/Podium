@@ -406,6 +406,7 @@ async fn create_scratchpad_round_trip_via_mcp() {
     let created = tools
         .create_scratchpad(Parameters(CreateScratchpadParams {
             project_id: project_id.to_string(),
+            author: None,
         }))
         .await
         .expect("create_scratchpad");
@@ -423,6 +424,7 @@ async fn create_scratchpad_round_trip_via_mcp() {
             project_id: project_id.to_string(),
             id: scratchpad_id.clone(),
             content: "meeting notes".to_string(),
+            author: None,
         }))
         .await
         .expect("update_scratchpad");
@@ -431,6 +433,22 @@ async fn create_scratchpad_round_trip_via_mcp() {
     assert!(
         updated_text.contains("\"updatedBy\": \"agent\""),
         "{updated_text:?}"
+    );
+
+    // An explicit author overrides the "agent" default.
+    let renamed_author = tools
+        .update_scratchpad(Parameters(UpdateScratchpadParams {
+            project_id: project_id.to_string(),
+            id: scratchpad_id,
+            content: "meeting notes v2".to_string(),
+            author: Some("claude-code".to_string()),
+        }))
+        .await
+        .expect("update_scratchpad with explicit author");
+    let renamed_text = first_text(&renamed_author);
+    assert!(
+        renamed_text.contains("\"updatedBy\": \"claude-code\""),
+        "{renamed_text:?}"
     );
 
     orch.shutdown().await;
@@ -449,6 +467,7 @@ async fn list_scratchpads_round_trip_via_mcp() {
     tools
         .create_scratchpad(Parameters(CreateScratchpadParams {
             project_id: project_id.to_string(),
+            author: None,
         }))
         .await
         .expect("create_scratchpad");
