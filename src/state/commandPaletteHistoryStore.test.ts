@@ -41,7 +41,7 @@ describe("commandPaletteHistoryStore", () => {
     const entries = useCommandPaletteHistoryStore.getState().entries;
     expect(entries).toHaveLength(20);
     expect(entries[0].actionId).toBe("action-24");
-    expect(entries.at(-1)?.actionId).toBe("action-5");
+    expect(entries[entries.length - 1].actionId).toBe("action-5");
   });
 
   it('persists to localStorage under "podium.commandPaletteHistory" and reloads on next store creation', async () => {

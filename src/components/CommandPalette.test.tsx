@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCommandPaletteActions } from "../lib/commandPaletteActions";
+import { useCommandPaletteHistoryStore } from "../state/commandPaletteHistoryStore";
 import { CommandPalette } from "./CommandPalette";
 
 describe("CommandPalette", () => {
@@ -72,5 +73,53 @@ describe("CommandPalette — actions", () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("CommandPalette — history", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useCommandPaletteHistoryStore.setState({ entries: [] }, false);
+  });
+
+  it('executing "Instellingen" records it in the history store', () => {
+    const openSettings = vi.fn();
+    const actions = createCommandPaletteActions({ openSettings });
+    render(<CommandPalette open onClose={() => undefined} actions={actions} />);
+
+    fireEvent.click(screen.getByText("Instellingen"));
+
+    expect(useCommandPaletteHistoryStore.getState().entries).toEqual([
+      { actionId: "settings" },
+    ]);
+  });
+
+  it("with an empty query, the most recently used action appears first in the list", () => {
+    useCommandPaletteHistoryStore.getState().recordUsed("b");
+    const actions = [
+      { id: "a", label: "Alpha", handler: () => undefined },
+      { id: "b", label: "Beta", handler: () => undefined },
+    ];
+
+    render(<CommandPalette open onClose={() => undefined} actions={actions} />);
+
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveTextContent("Beta");
+    expect(options[1]).toHaveTextContent("Alpha");
+  });
+
+  it("a history entry referencing a since-removed action id is silently skipped when rendering", () => {
+    useCommandPaletteHistoryStore.getState().recordUsed("ghost");
+    const actions = [
+      { id: "a", label: "Alpha", handler: () => undefined },
+      { id: "b", label: "Beta", handler: () => undefined },
+    ];
+
+    render(<CommandPalette open onClose={() => undefined} actions={actions} />);
+
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveTextContent("Alpha");
+    expect(options[1]).toHaveTextContent("Beta");
   });
 });
