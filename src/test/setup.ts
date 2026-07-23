@@ -13,6 +13,9 @@
  *   `coordsAtPos`, which needs these on a `Range` — without the shim it
  *   throws an uncaught `TypeError` from inside prosemirror-view on every test
  *   that focuses a real Tiptap editor (see `ScratchpadEditor.test.tsx`).
+ * - Stubs `ResizeObserver`, which jsdom doesn't implement. `cmdk` observes
+ *   its list for height changes on mount — without the stub it throws a
+ *   `ReferenceError` on every `CommandPalette` render.
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -75,6 +78,14 @@ if (typeof Range !== "undefined" && !Range.prototype.getBoundingClientRect) {
       bottom: 0,
       toJSON: () => ({}),
     }) as DOMRect;
+}
+
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
 }
 
 afterEach(() => {
