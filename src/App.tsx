@@ -25,6 +25,7 @@ import {
   onTodosChanged,
   onWindowCloseRequested,
 } from "./ipc/events";
+import { createCommandPaletteActions } from "./lib/commandPaletteActions";
 import { isMac, isWindows } from "./lib/platform";
 import {
   applyFontSizeToTerminals,
@@ -40,6 +41,7 @@ import { useSettingsStore } from "./state/settingsStore";
 import { useThemeStore } from "./state/themeStore";
 import { useTodoStore } from "./state/todoStore";
 import { CloseWarningModal } from "./components/CloseWarningModal";
+import { CommandPalette } from "./components/CommandPalette";
 import { LogoMark } from "./components/LogoMark";
 import { ScratchpadDetailPane } from "./components/ScratchpadDetailPane";
 import { SettingsModal } from "./components/SettingsModal";
@@ -55,6 +57,7 @@ import styles from "./App.module.css";
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [closeWarnOpen, setCloseWarnOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
   const setSidebarWidth = useLayoutStore((s) => s.setSidebarWidth);
@@ -64,6 +67,10 @@ export default function App() {
   const activeProcess = useProcessStore(
     (s) => s.processes.find((p) => p.id === s.activeProcessId) ?? null,
   );
+
+  const paletteActions = createCommandPaletteActions({
+    openSettings: () => setSettingsOpen(true),
+  });
 
   // Initial state pull + lifecycle-event subscriptions. Startup restores the
   // persisted workspace (re-opening every project), then re-pulls processes.
@@ -173,12 +180,28 @@ export default function App() {
   // `menu:open-settings`, so the in-app shortcut binds only elsewhere to
   // avoid a double-fire. A desktop app must never reload its webview, so
   // swallow the browser refresh shortcuts (F5, Cmd/Ctrl+R) on every platform.
+  //
+  // Cmd/Ctrl+Shift+P opens the command palette on every platform (there is no
+  // native menu item to defer to here, unlike Settings). It's suppressed
+  // while a terminal has keyboard focus — xterm.js never stops keydowns from
+  // reaching `window`, so without this guard the shortcut would fire *and*
+  // the keystroke would still reach the shell underneath.
   useEffect(() => {
     const menuSub = onMenuOpenSettings(() => setSettingsOpen(true));
     const onKey = (e: KeyboardEvent) => {
       if (!isMac && (e.ctrlKey || e.metaKey) && e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
+        return;
+      }
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "p"
+      ) {
+        if (document.activeElement?.closest(".xterm")) return;
+        e.preventDefault();
+        setPaletteOpen(true);
         return;
       }
       if (
@@ -265,6 +288,11 @@ export default function App() {
       <CloseWarningModal
         open={closeWarnOpen}
         onClose={() => setCloseWarnOpen(false)}
+      />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        actions={paletteActions}
       />
     </div>
   );

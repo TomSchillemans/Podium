@@ -1,0 +1,104 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 1000;
+}
+
+.overlay[data-state="open"] {
+  animation: fade var(--dur-3) var(--ease-out);
+}
+
+.overlay[data-state="closed"] {
+  animation: fade var(--dur-2) var(--ease-in) reverse forwards;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: min(560px, 92vw);
+  max-height: calc(100vh - 24vh);
+  display: flex;
+  flex-direction: column;
+  outline: none;
+  transform-origin: top center;
+}
+
+.card[data-state="open"] {
+  animation: pop var(--dur-3) var(--ease-spring);
+}
+
+.card[data-state="closed"] {
+  animation: popOut var(--dur-2) var(--ease-in) forwards;
+}
+
+.command {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: var(--sp-4);
+  font-size: var(--fs-lg);
+  color: var(--text);
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+.list {
+  overflow: auto;
+  padding: var(--sp-2);
+}
+
+.item {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-md);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.item[data-selected="true"] {
+  background: var(--surface-hover);
+}
+
+.empty {
+  padding: var(--sp-4);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop {
+  from {
+    transform: translateY(8px) scale(0.96);
+    opacity: 0;
+  }
+}
+
+@keyframes popOut {
+  to {
+    transform: translateY(6px) scale(0.98);
+    opacity: 0;
+  }
+}
