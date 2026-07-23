@@ -3,7 +3,10 @@
 export interface CommandPaletteAction {
   id: string;
   label: string;
-  handler: () => void;
+  /** Absent when the action only opens a sub-list (see `items`). */
+  handler?: () => void;
+  /** A sub-list shown when this action is selected, instead of running a handler. */
+  items?: CommandPaletteAction[];
 }
 
 // Most-recently-used actions first, oldest-to-newest ties broken by the

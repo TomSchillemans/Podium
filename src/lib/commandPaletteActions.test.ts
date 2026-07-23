@@ -18,7 +18,7 @@ describe("createCommandPaletteActions", () => {
     const actions = createCommandPaletteActions({ openSettings });
 
     const settings = actions.find((a) => a.id === "settings");
-    settings?.handler();
+    settings?.handler?.();
 
     expect(openSettings).toHaveBeenCalledOnce();
   });

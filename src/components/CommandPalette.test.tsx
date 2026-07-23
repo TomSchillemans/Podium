@@ -123,3 +123,51 @@ describe("CommandPalette — history", () => {
     expect(options[1]).toHaveTextContent("Beta");
   });
 });
+
+describe("CommandPalette — nested pages", () => {
+  function parentAction() {
+    return {
+      id: "parent",
+      label: "Open sub-list",
+      items: [
+        { id: "child-a", label: "Child A", handler: vi.fn() },
+        { id: "child-b", label: "Child B", handler: vi.fn() },
+      ],
+    };
+  }
+
+  it("selecting an action with a sub-list pushes a page and shows the sub-list items", () => {
+    render(<CommandPalette open onClose={() => undefined} actions={[parentAction()]} />);
+
+    fireEvent.click(screen.getByText("Open sub-list"));
+
+    expect(screen.getByText("Child A")).toBeInTheDocument();
+    expect(screen.getByText("Child B")).toBeInTheDocument();
+    expect(screen.queryByText("Open sub-list")).not.toBeInTheDocument();
+  });
+
+  it("Escape inside a sub-list pops back to the previous page (root), palette stays open", () => {
+    const onClose = vi.fn();
+    render(
+      <CommandPalette open onClose={onClose} actions={[parentAction()]} />,
+    );
+    fireEvent.click(screen.getByText("Open sub-list"));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.getByText("Open sub-list")).toBeInTheDocument();
+    expect(screen.queryByText("Child A")).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("Escape on the root page closes the palette", () => {
+    const onClose = vi.fn();
+    render(
+      <CommandPalette open onClose={onClose} actions={[parentAction()]} />,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalled();
+  });
+});

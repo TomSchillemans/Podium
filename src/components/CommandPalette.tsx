@@ -1,7 +1,7 @@
 /** The command palette: a searchable list of app-wide actions (Cmd/Ctrl+Shift+P). */
 
 import { Command } from "cmdk";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { CommandPaletteAction } from "../lib/commandPaletteActions";
 import { orderByHistory } from "../lib/commandPaletteActions";
@@ -25,14 +25,34 @@ export function CommandPalette({
   const { mounted, state } = usePresence(open, MOTION.base);
   const history = useCommandPaletteHistoryStore((s) => s.entries);
 
+  // A breadcrumb stack of sub-lists pushed by selecting an action with
+  // `items` (cmdk's "pages" pattern); empty means the root list is showing.
+  const [pageStack, setPageStack] = useState<CommandPaletteAction[][]>([]);
+  // Only the root list is reordered by recency — a pushed sub-list keeps its
+  // declared order.
+  const currentActions =
+    pageStack.length > 0
+      ? pageStack[pageStack.length - 1]
+      : orderByHistory(actions, history);
+
+  useEffect(() => {
+    if (open) return;
+    setPageStack([]);
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (pageStack.length > 0) {
+        setPageStack((prev) => prev.slice(0, -1));
+      } else {
+        onClose();
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, pageStack]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus({ preventScroll: true });
@@ -41,12 +61,14 @@ export function CommandPalette({
   if (!mounted) return null;
 
   function runAction(action: CommandPaletteAction) {
-    action.handler();
+    if (action.items) {
+      setPageStack((prev) => [...prev, action.items!]);
+      return;
+    }
+    action.handler?.();
     useCommandPaletteHistoryStore.getState().recordUsed(action.id);
     onClose();
   }
-
-  const orderedActions = orderByHistory(actions, history);
 
   return (
     <div
@@ -74,7 +96,7 @@ export function CommandPalette({
             <Command.Empty className={styles.empty}>
               No matching commands.
             </Command.Empty>
-            {orderedActions.map((action) => (
+            {currentActions.map((action) => (
               <Command.Item
                 key={action.id}
                 value={action.label}
