@@ -4,6 +4,7 @@ import { Command } from "cmdk";
 import { useEffect, useRef } from "react";
 
 import type { CommandPaletteAction } from "../lib/commandPaletteActions";
+import { orderByHistory } from "../lib/commandPaletteActions";
 import { MOTION, usePresence } from "../lib/motion";
 import { useCommandPaletteHistoryStore } from "../state/commandPaletteHistoryStore";
 import styles from "./CommandPalette.module.css";
@@ -12,26 +13,6 @@ export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   actions?: CommandPaletteAction[];
-}
-
-// Most-recently-used actions first, oldest-to-newest ties broken by the
-// caller's original order; a history entry for an action that no longer
-// exists (e.g. a removed adapter) is dropped rather than rendered.
-function orderByHistory(
-  actions: CommandPaletteAction[],
-  history: { actionId: string }[],
-): CommandPaletteAction[] {
-  const byId = new Map(actions.map((a) => [a.id, a]));
-  const seen = new Set<string>();
-  const recent: CommandPaletteAction[] = [];
-  for (const entry of history) {
-    if (seen.has(entry.actionId)) continue;
-    const action = byId.get(entry.actionId);
-    if (!action) continue;
-    recent.push(action);
-    seen.add(entry.actionId);
-  }
-  return [...recent, ...actions.filter((a) => !seen.has(a.id))];
 }
 
 export function CommandPalette({
