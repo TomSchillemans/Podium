@@ -91,4 +91,20 @@ describe("App — command palette shortcut", () => {
       screen.queryByRole("dialog", { name: "Settings" }),
     ).not.toBeInTheDocument();
   });
+
+  it("selecting Instellingen in the palette opens SettingsModal and closes the palette", async () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "P", metaKey: true, shiftKey: true });
+
+    fireEvent.click(screen.getByText("Instellingen"));
+
+    expect(
+      screen.getByRole("dialog", { name: "Settings" }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Command Palette" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
 });

@@ -25,6 +25,7 @@ import {
   onTodosChanged,
   onWindowCloseRequested,
 } from "./ipc/events";
+import { createCommandPaletteActions } from "./lib/commandPaletteActions";
 import { isMac, isWindows } from "./lib/platform";
 import {
   applyFontSizeToTerminals,
@@ -66,6 +67,10 @@ export default function App() {
   const activeProcess = useProcessStore(
     (s) => s.processes.find((p) => p.id === s.activeProcessId) ?? null,
   );
+
+  const paletteActions = createCommandPaletteActions({
+    openSettings: () => setSettingsOpen(true),
+  });
 
   // Initial state pull + lifecycle-event subscriptions. Startup restores the
   // persisted workspace (re-opening every project), then re-pulls processes.
@@ -287,6 +292,7 @@ export default function App() {
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
+        actions={paletteActions}
       />
     </div>
   );
