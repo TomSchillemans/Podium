@@ -22,6 +22,21 @@ describe("createCommandPaletteActions", () => {
 
     expect(openSettings).toHaveBeenCalledOnce();
   });
+
+  it('includes a "Thema wisselen" root action with 3 sub-items (Licht/Donker/Retro)', () => {
+    const actions = createCommandPaletteActions({
+      openSettings: () => undefined,
+    });
+
+    const theme = actions.find((a) => a.id === "theme");
+
+    expect(theme?.label).toBe("Thema wisselen");
+    expect(theme?.items?.map((item) => item.label)).toEqual([
+      "Licht",
+      "Donker",
+      "Retro",
+    ]);
+  });
 });
 
 describe("orderByHistory", () => {

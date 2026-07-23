@@ -1,5 +1,7 @@
 /** Top-level command palette action registry. */
 
+import { useThemeStore, type ThemeMode } from "../state/themeStore";
+
 export interface CommandPaletteAction {
   id: string;
   label: string;
@@ -33,10 +35,29 @@ export interface CommandPaletteHandlers {
   openSettings: () => void;
 }
 
+const THEME_LABELS: Record<ThemeMode, string> = {
+  light: "Licht",
+  dark: "Donker",
+  retro: "Retro",
+};
+
+function setTheme(mode: ThemeMode): void {
+  useThemeStore.getState().setTheme(mode);
+}
+
 export function createCommandPaletteActions(
   handlers: CommandPaletteHandlers,
 ): CommandPaletteAction[] {
   return [
     { id: "settings", label: "Instellingen", handler: handlers.openSettings },
+    {
+      id: "theme",
+      label: "Thema wisselen",
+      items: (["light", "dark", "retro"] as ThemeMode[]).map((mode) => ({
+        id: mode,
+        label: THEME_LABELS[mode],
+        handler: () => setTheme(mode),
+      })),
+    },
   ];
 }
