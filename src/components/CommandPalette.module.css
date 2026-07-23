@@ -64,6 +64,18 @@
   padding: var(--sp-2);
 }
 
+.item {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-md);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.item[data-selected="true"] {
+  background: var(--surface-hover);
+}
+
 .empty {
   padding: var(--sp-4);
   color: var(--text-muted);

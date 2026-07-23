@@ -16,6 +16,9 @@
  * - Stubs `ResizeObserver`, which jsdom doesn't implement. `cmdk` observes
  *   its list for height changes on mount — without the stub it throws a
  *   `ReferenceError` on every `CommandPalette` render.
+ * - Stubs `Element.prototype.scrollIntoView`, which jsdom doesn't implement.
+ *   `cmdk` scrolls the selected item into view on every selection/filter
+ *   change — without the stub it throws a `TypeError` on every keystroke.
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -86,6 +89,10 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     unobserve() {}
     disconnect() {}
   };
+}
+
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
 }
 
 afterEach(() => {

@@ -3,15 +3,21 @@
 import { Command } from "cmdk";
 import { useEffect, useRef } from "react";
 
+import type { CommandPaletteAction } from "../lib/commandPaletteActions";
 import { MOTION, usePresence } from "../lib/motion";
 import styles from "./CommandPalette.module.css";
 
 export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
+  actions?: CommandPaletteAction[];
 }
 
-export function CommandPalette({ open, onClose }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  onClose,
+  actions = [],
+}: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   // Keep the dialog mounted while it animates closed (see `usePresence`).
   const { mounted, state } = usePresence(open, MOTION.base);
@@ -30,6 +36,11 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   }, [open]);
 
   if (!mounted) return null;
+
+  function runAction(action: CommandPaletteAction) {
+    action.handler();
+    onClose();
+  }
 
   return (
     <div
@@ -57,6 +68,16 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             <Command.Empty className={styles.empty}>
               No matching commands.
             </Command.Empty>
+            {actions.map((action) => (
+              <Command.Item
+                key={action.id}
+                value={action.label}
+                className={styles.item}
+                onSelect={() => runAction(action)}
+              >
+                {action.label}
+              </Command.Item>
+            ))}
           </Command.List>
         </Command>
       </div>
