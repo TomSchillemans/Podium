@@ -1,5 +1,7 @@
 /** Top-level command palette action registry. */
 
+import type { ProjectId } from "../ipc/types";
+import { useProjectStore } from "../state/projectStore";
 import { useThemeStore, type ThemeMode } from "../state/themeStore";
 
 export interface CommandPaletteAction {
@@ -31,8 +33,15 @@ export function orderByHistory(
   return [...recent, ...actions.filter((a) => !seen.has(a.id))];
 }
 
+/** A project chosen from the "Nieuwe agent starten" sub-list — already open
+ *  (has a `projectId`) or picked from the workspace fallback (a `path` to
+ *  open first). */
+export type NewAgentProjectChoice = { projectId: ProjectId } | { path: string };
+
 export interface CommandPaletteHandlers {
   openSettings: () => void;
+  /** Absent in tests that don't exercise the "Nieuwe agent starten" action. */
+  onNewAgentProject?: (choice: NewAgentProjectChoice) => void;
 }
 
 const THEME_LABELS: Record<ThemeMode, string> = {
@@ -43,6 +52,27 @@ const THEME_LABELS: Record<ThemeMode, string> = {
 
 function setTheme(mode: ThemeMode): void {
   useThemeStore.getState().setTheme(mode);
+}
+
+// The project sub-list always shows the open projects (even just one); with
+// none open it falls back to the workspace's recent projects so the user can
+// open one first.
+function newAgentProjectItems(
+  onNewAgentProject: CommandPaletteHandlers["onNewAgentProject"],
+): CommandPaletteAction[] {
+  const { projects, recents } = useProjectStore.getState();
+  if (projects.length > 0) {
+    return projects.map((p) => ({
+      id: `new-agent-project-${p.id}`,
+      label: p.name,
+      handler: () => onNewAgentProject?.({ projectId: p.id }),
+    }));
+  }
+  return recents.map((r) => ({
+    id: `new-agent-workspace-${r.path}`,
+    label: r.name,
+    handler: () => onNewAgentProject?.({ path: r.path }),
+  }));
 }
 
 export function createCommandPaletteActions(
@@ -58,6 +88,11 @@ export function createCommandPaletteActions(
         label: THEME_LABELS[mode],
         handler: () => setTheme(mode),
       })),
+    },
+    {
+      id: "new-agent",
+      label: "Nieuwe agent starten",
+      items: newAgentProjectItems(handlers.onNewAgentProject),
     },
   ];
 }

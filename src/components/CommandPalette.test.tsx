@@ -1,8 +1,21 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// The project store pulls in the IPC layer; jsdom has no Tauri bridge.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(() => Promise.resolve([])),
+  Channel: class {
+    onmessage: (message: unknown) => void = () => undefined;
+  },
+}));
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(() => Promise.resolve(null)),
+}));
+
+import type { ProjectInfo } from "../ipc/types";
 import { createCommandPaletteActions } from "../lib/commandPaletteActions";
 import { useCommandPaletteHistoryStore } from "../state/commandPaletteHistoryStore";
+import { useProjectStore } from "../state/projectStore";
 import { useThemeStore } from "../state/themeStore";
 import { CommandPalette } from "./CommandPalette";
 
@@ -297,5 +310,100 @@ describe("CommandPalette — theme preview", () => {
 
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(setTheme).not.toHaveBeenCalled();
+  });
+});
+
+describe("CommandPalette — new agent project sub-list", () => {
+  const initialProjectState = useProjectStore.getState();
+
+  afterEach(() => {
+    useProjectStore.setState(initialProjectState, true);
+  });
+
+  function project(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
+    return {
+      id: "proj-1",
+      name: "Webshop",
+      root: "/fake/webshop",
+      iconInitials: "WS",
+      configError: null,
+      renamed: false,
+      ...overrides,
+    };
+  }
+
+  function renderWithNewAgentAction() {
+    const onNewAgentProject = vi.fn();
+    const actions = createCommandPaletteActions({
+      openSettings: () => undefined,
+      onNewAgentProject,
+    });
+    render(<CommandPalette open onClose={() => undefined} actions={actions} />);
+    return { onNewAgentProject };
+  }
+
+  it('selecting "Nieuwe agent starten" with 1 open project still shows a project sub-list', () => {
+    useProjectStore.setState({ projects: [project()] });
+    renderWithNewAgentAction();
+
+    fireEvent.click(screen.getByText("Nieuwe agent starten"));
+
+    expect(screen.getByText("Webshop")).toBeInTheDocument();
+  });
+
+  it('selecting "Nieuwe agent starten" with 3 open projects shows all 3 in the sub-list', () => {
+    useProjectStore.setState({
+      projects: [
+        project({ id: "proj-1", name: "Alpha" }),
+        project({ id: "proj-2", name: "Beta" }),
+        project({ id: "proj-3", name: "Gamma" }),
+      ],
+    });
+    renderWithNewAgentAction();
+
+    fireEvent.click(screen.getByText("Nieuwe agent starten"));
+
+    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    expect(screen.getByText("Beta")).toBeInTheDocument();
+    expect(screen.getByText("Gamma")).toBeInTheDocument();
+  });
+
+  it("with no open project, the sub-list shows workspace projects instead", () => {
+    useProjectStore.setState({
+      projects: [],
+      recents: [{ path: "/fake/archive", name: "Archive", lastOpenedAt: 0 }],
+    });
+    renderWithNewAgentAction();
+
+    fireEvent.click(screen.getByText("Nieuwe agent starten"));
+
+    expect(screen.getByText("Archive")).toBeInTheDocument();
+  });
+
+  it("selecting an open project calls onNewAgentProject with its projectId", () => {
+    useProjectStore.setState({ projects: [project()] });
+    const { onNewAgentProject } = renderWithNewAgentAction();
+
+    fireEvent.click(screen.getByText("Nieuwe agent starten"));
+    fireEvent.click(screen.getByText("Webshop"));
+
+    expect(onNewAgentProject).toHaveBeenCalledExactlyOnceWith({
+      projectId: "proj-1",
+    });
+  });
+
+  it("selecting a workspace (not-yet-open) project calls onNewAgentProject with its path", () => {
+    useProjectStore.setState({
+      projects: [],
+      recents: [{ path: "/fake/archive", name: "Archive", lastOpenedAt: 0 }],
+    });
+    const { onNewAgentProject } = renderWithNewAgentAction();
+
+    fireEvent.click(screen.getByText("Nieuwe agent starten"));
+    fireEvent.click(screen.getByText("Archive"));
+
+    expect(onNewAgentProject).toHaveBeenCalledExactlyOnceWith({
+      path: "/fake/archive",
+    });
   });
 });
