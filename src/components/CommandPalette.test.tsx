@@ -138,6 +138,33 @@ describe("CommandPalette — history", () => {
   });
 });
 
+describe("CommandPalette — new terminal project sub-list", () => {
+  it('selecting "Nieuw terminal/process starten" with 1 open project still shows a project sub-list', () => {
+    const actions = createCommandPaletteActions({
+      openSettings: () => undefined,
+      openProjects: [{ id: "p1", label: "Project One" }],
+    });
+    render(<CommandPalette open onClose={() => undefined} actions={actions} />);
+
+    fireEvent.click(screen.getByText("Nieuw terminal/process starten"));
+
+    expect(screen.getByText("Project One")).toBeInTheDocument();
+  });
+
+  it("with no open project, the sub-list shows workspace projects instead", () => {
+    const actions = createCommandPaletteActions({
+      openSettings: () => undefined,
+      openProjects: [],
+      workspaceProjects: [{ id: "/tmp/proj", label: "Proj" }],
+    });
+    render(<CommandPalette open onClose={() => undefined} actions={actions} />);
+
+    fireEvent.click(screen.getByText("Nieuw terminal/process starten"));
+
+    expect(screen.getByText("Proj")).toBeInTheDocument();
+  });
+});
+
 describe("CommandPalette — nested pages", () => {
   function parentAction() {
     return {

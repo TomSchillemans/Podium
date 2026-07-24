@@ -38,10 +38,25 @@ export function orderByHistory(
  *  open first). */
 export type NewAgentProjectChoice = { projectId: ProjectId } | { path: string };
 
+/** One project offered by the "Nieuw terminal/process starten" sub-list. */
+export interface ProjectPickerEntry {
+  id: string;
+  label: string;
+}
+
 export interface CommandPaletteHandlers {
   openSettings: () => void;
   /** Absent in tests that don't exercise the "Nieuwe agent starten" action. */
   onNewAgentProject?: (choice: NewAgentProjectChoice) => void;
+  /** Currently open projects — the "Nieuw terminal/process starten" sub-list's
+   *  primary source, always shown (even with just one entry). */
+  openProjects?: ProjectPickerEntry[];
+  /** Shown instead when no project is open, so the user can open one first. */
+  workspaceProjects?: ProjectPickerEntry[];
+  /** Create+start a terminal in an already-open project. */
+  onNewTerminalInProject?: (projectId: string) => void;
+  /** Open a not-yet-open (workspace) project, then create+start a terminal in it. */
+  onNewTerminalInWorkspaceProject?: (path: string) => void;
 }
 
 const THEME_LABELS: Record<ThemeMode, string> = {
@@ -54,6 +69,23 @@ function setTheme(mode: ThemeMode): void {
   useThemeStore.getState().setTheme(mode);
 }
 
+// Shared by every "pick a project" sub-list (#13's "Nieuwe agent starten",
+// #14's "Nieuw terminal/process starten"): show the primary (open-project)
+// entries when there's at least one — even just one — otherwise fall back to
+// the workspace entries so the user can open a project first. `primary` and
+// `fallback` can carry different shapes (e.g. `ProjectInfo` vs. a recent
+// workspace entry), hence the two separate mapping functions.
+function projectPickerItems<P, F>(
+  primary: P[],
+  fallback: F[],
+  fromPrimary: (entry: P) => CommandPaletteAction,
+  fromFallback: (entry: F) => CommandPaletteAction,
+): CommandPaletteAction[] {
+  return primary.length > 0
+    ? primary.map(fromPrimary)
+    : fallback.map(fromFallback);
+}
+
 // The project sub-list always shows the open projects (even just one); with
 // none open it falls back to the workspace's recent projects so the user can
 // open one first.
@@ -61,18 +93,43 @@ function newAgentProjectItems(
   onNewAgentProject: CommandPaletteHandlers["onNewAgentProject"],
 ): CommandPaletteAction[] {
   const { projects, recents } = useProjectStore.getState();
-  if (projects.length > 0) {
-    return projects.map((p) => ({
+  return projectPickerItems(
+    projects,
+    recents,
+    (p) => ({
       id: `new-agent-project-${p.id}`,
       label: p.name,
       handler: () => onNewAgentProject?.({ projectId: p.id }),
-    }));
-  }
-  return recents.map((r) => ({
-    id: `new-agent-workspace-${r.path}`,
-    label: r.name,
-    handler: () => onNewAgentProject?.({ path: r.path }),
-  }));
+    }),
+    (r) => ({
+      id: `new-agent-workspace-${r.path}`,
+      label: r.name,
+      handler: () => onNewAgentProject?.({ path: r.path }),
+    }),
+  );
+}
+
+function newTerminalAction(
+  handlers: CommandPaletteHandlers,
+): CommandPaletteAction {
+  return {
+    id: "new-terminal",
+    label: "Nieuw terminal/process starten",
+    items: projectPickerItems(
+      handlers.openProjects ?? [],
+      handlers.workspaceProjects ?? [],
+      (project) => ({
+        id: project.id,
+        label: project.label,
+        handler: () => handlers.onNewTerminalInProject?.(project.id),
+      }),
+      (project) => ({
+        id: project.id,
+        label: project.label,
+        handler: () => handlers.onNewTerminalInWorkspaceProject?.(project.id),
+      }),
+    ),
+  };
 }
 
 export function createCommandPaletteActions(
@@ -80,6 +137,7 @@ export function createCommandPaletteActions(
 ): CommandPaletteAction[] {
   return [
     { id: "settings", label: "Instellingen", handler: handlers.openSettings },
+    newTerminalAction(handlers),
     {
       id: "theme",
       label: "Thema wisselen",
