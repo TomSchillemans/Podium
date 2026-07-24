@@ -24,7 +24,6 @@ import { useLayoutStore } from "../state/layoutStore";
 import { useProcessStore } from "../state/processStore";
 import { useProjectStore } from "../state/projectStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { NewAgentModal } from "./NewAgentModal";
 import { ProcessRow } from "./ProcessRow";
 import { ScratchpadAgentModal } from "./ScratchpadAgentModal";
 import { ScratchpadSubsection } from "./ScratchpadSubsection";
@@ -374,8 +373,13 @@ function ProjectGroup({
   );
 }
 
-/** What the New agent modal is opened for: a plain new agent, or a to-do. */
-interface AgentModalTarget {
+/**
+ * What the New agent modal is opened for: a plain new agent, or a to-do.
+ * Exported because the modal itself (and the state driving it) lives in
+ * App now — the command palette's "Nieuwe agent starten" action needs to
+ * open it too, not just the Sidebar's own row button.
+ */
+export interface AgentModalTarget {
   projectId: ProjectId;
   todoIds?: TodoId[];
   initialName?: string;
@@ -388,8 +392,12 @@ interface ScratchpadAgentModalTarget {
   initialName?: string;
 }
 
-export function Sidebar() {
-  const [agentModal, setAgentModal] = useState<AgentModalTarget | null>(null);
+interface SidebarProps {
+  /** Open the New agent modal (owned by App) scoped to this target. */
+  onOpenNewAgentModal: (target: AgentModalTarget) => void;
+}
+
+export function Sidebar({ onOpenNewAgentModal }: SidebarProps) {
   const [scratchpadAgentModal, setScratchpadAgentModal] =
     useState<ScratchpadAgentModalTarget | null>(null);
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
@@ -445,10 +453,10 @@ export function Sidebar() {
               }}
               onDragEnd={finishDrag}
               onDrop={handleDrop}
-              onNewAgent={(projectId) => setAgentModal({ projectId })}
+              onNewAgent={(projectId) => onOpenNewAgentModal({ projectId })}
               onOpenTodo={openTodoInWorkArea}
               onPickAgent={(projectId, todoIds, initialName) =>
-                setAgentModal({ projectId, todoIds, initialName })
+                onOpenNewAgentModal({ projectId, todoIds, initialName })
               }
               onOpenScratchpad={openScratchpadInWorkArea}
               onPickScratchpadAgent={(projectId, scratchpadIds, initialName) =>
@@ -478,13 +486,6 @@ export function Sidebar() {
         </button>
       </div>
 
-      <NewAgentModal
-        open={agentModal !== null}
-        projectId={agentModal?.projectId ?? null}
-        todoIds={agentModal?.todoIds}
-        initialName={agentModal?.initialName}
-        onClose={() => setAgentModal(null)}
-      />
       <ScratchpadAgentModal
         open={scratchpadAgentModal !== null}
         projectId={scratchpadAgentModal?.projectId ?? null}

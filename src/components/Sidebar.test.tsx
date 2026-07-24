@@ -43,7 +43,7 @@ describe("Sidebar project header", () => {
     // reveals on hover is present and draggable at rest — the actual
     // hover-triggered visibility is CSS-only and isn't asserted here.
     useProjectStore.setState({ projects: [project()] });
-    render(<Sidebar />);
+    render(<Sidebar onOpenNewAgentModal={() => undefined} />);
 
     const handle = screen.getByRole("img", {
       name: "Drag to reorder Webshop",
@@ -60,7 +60,7 @@ describe("Sidebar project header", () => {
       ],
       reorderProjects,
     });
-    render(<Sidebar />);
+    render(<Sidebar onOpenNewAgentModal={() => undefined} />);
 
     const [firstHandle, secondHandle] = screen.getAllByRole("img", {
       name: /Drag to reorder/,
@@ -74,5 +74,20 @@ describe("Sidebar project header", () => {
     fireEvent.drop(secondGroup);
 
     expect(reorderProjects).toHaveBeenCalledWith("proj-1", "proj-2");
+  });
+
+  // Regression: the New agent row button used to open a `NewAgentModal`
+  // rendered locally in Sidebar; that state (and the modal) moved up to
+  // App so the command palette can also open it (see #13).
+  it("the project's New agent button still reports the project to open the modal for", () => {
+    const onOpenNewAgentModal = vi.fn();
+    useProjectStore.setState({ projects: [project()] });
+    render(<Sidebar onOpenNewAgentModal={onOpenNewAgentModal} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "New agent" }));
+
+    expect(onOpenNewAgentModal).toHaveBeenCalledExactlyOnceWith({
+      projectId: "proj-1",
+    });
   });
 });

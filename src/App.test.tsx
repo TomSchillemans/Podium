@@ -1,17 +1,49 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // App wires up IPC on mount; jsdom has no Tauri bridge, so stub it out.
 // `invoke` resolves per-command fixtures (all list commands — including
 // `workspace_list` — return arrays) and `listen` resolves a no-op unlisten.
+// `project_list` and `recents_list` read from these fixtures so individual
+// tests can seed "already open" vs. "not yet open" projects; both default to
+// empty (the pre-existing empty-workspace behaviour).
+const fixtures = vi.hoisted(() => ({
+  projectList: [] as unknown[],
+  recentsList: [] as unknown[],
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn((cmd: string) =>
-    Promise.resolve(
-      cmd === "adapters_list"
-        ? [{ id: "claude-code", displayName: "Claude Code", available: true }]
-        : [],
-    ),
-  ),
+  invoke: vi.fn((cmd: string, args?: Record<string, unknown>) => {
+    switch (cmd) {
+      case "adapters_list":
+        return Promise.resolve([
+          { id: "claude-code", displayName: "Claude Code", available: true },
+        ]);
+      case "project_list":
+        return Promise.resolve(fixtures.projectList);
+      case "recents_list":
+        return Promise.resolve(fixtures.recentsList);
+      case "project_open": {
+        const path = (args as { path?: string } | undefined)?.path ?? "";
+        return Promise.resolve({
+          id: `opened-${path}`,
+          name: "Opened Project",
+          root: path,
+          iconInitials: "OP",
+          configError: null,
+          renamed: false,
+        });
+      }
+      default:
+        return Promise.resolve([]);
+    }
+  }),
   Channel: class {
     onmessage: (message: unknown) => void = () => undefined;
   },
@@ -23,6 +55,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(() => Promise.resolve(null)),
 }));
 
+import { useProcessStore } from "./state/processStore";
 import App from "./App";
 
 describe("App", () => {
@@ -105,6 +138,98 @@ describe("App — command palette shortcut", () => {
       expect(
         screen.queryByRole("dialog", { name: "Command Palette" }),
       ).not.toBeInTheDocument(),
+    );
+  });
+});
+
+describe("App — command palette new agent dispatch", () => {
+  // Stub the store action itself (rather than letting a real spawn
+  // succeed): a successful spawn focuses the new process, which would mount
+  // a real xterm.js terminal — unsupported in jsdom (no canvas/matchMedia).
+  // Same shallow-merge caveat as the theme-preview spies above: a `set()`
+  // elsewhere copies whatever `spawnAgent` currently is into the next state
+  // object, so this must be restored after every test, not just spied on.
+  const realSpawnAgent = useProcessStore.getState().spawnAgent;
+
+  afterEach(() => {
+    fixtures.projectList = [];
+    fixtures.recentsList = [];
+    useProcessStore.setState({ spawnAgent: realSpawnAgent });
+  });
+
+  function openNewAgentSubList() {
+    fireEvent.keyDown(window, { key: "P", metaKey: true, shiftKey: true });
+    fireEvent.click(screen.getByText("Nieuwe agent starten"));
+    return within(screen.getByRole("dialog", { name: "Command Palette" }));
+  }
+
+  async function submitNewAgentForm(spawnAgent: ReturnType<typeof vi.fn>) {
+    await waitFor(() =>
+      expect(
+        screen.getByRole("dialog", { name: "New agent" }),
+      ).toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Start agent" })).toBeEnabled(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+
+    await waitFor(() => expect(spawnAgent).toHaveBeenCalledOnce());
+  }
+
+  it('choosing a project after "Nieuwe agent starten" opens NewAgentModal scoped to that project', async () => {
+    fixtures.projectList = [
+      {
+        id: "proj-1",
+        name: "Webshop",
+        root: "/fake/webshop",
+        iconInitials: "WS",
+        configError: null,
+        renamed: false,
+      },
+    ];
+    const spawnAgent = vi.fn(() => Promise.resolve(null));
+    useProcessStore.setState({ spawnAgent });
+
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByText("Webshop")).toBeInTheDocument(),
+    );
+
+    const palette = openNewAgentSubList();
+    fireEvent.click(palette.getByText("Webshop"));
+
+    await submitNewAgentForm(spawnAgent);
+
+    expect(spawnAgent).toHaveBeenCalledWith(
+      "proj-1",
+      expect.objectContaining({ adapterId: "claude-code" }),
+    );
+  });
+
+  it("choosing a project that is not yet open first opens it, then opens NewAgentModal", async () => {
+    fixtures.recentsList = [
+      { path: "/fake/newproj", name: "New Project", lastOpenedAt: 0 },
+    ];
+    const spawnAgent = vi.fn(() => Promise.resolve(null));
+    useProcessStore.setState({ spawnAgent });
+
+    render(<App />);
+    await waitFor(() =>
+      expect(
+        screen.getByText("No projects yet. Add one to get started."),
+      ).toBeInTheDocument(),
+    );
+
+    const palette = openNewAgentSubList();
+    fireEvent.click(palette.getByText("New Project"));
+
+    await submitNewAgentForm(spawnAgent);
+
+    expect(spawnAgent).toHaveBeenCalledWith(
+      "opened-/fake/newproj",
+      expect.objectContaining({ adapterId: "claude-code" }),
     );
   });
 });

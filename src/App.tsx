@@ -43,9 +43,10 @@ import { useTodoStore } from "./state/todoStore";
 import { CloseWarningModal } from "./components/CloseWarningModal";
 import { CommandPalette } from "./components/CommandPalette";
 import { LogoMark } from "./components/LogoMark";
+import { NewAgentModal } from "./components/NewAgentModal";
 import { ScratchpadDetailPane } from "./components/ScratchpadDetailPane";
 import { SettingsModal } from "./components/SettingsModal";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, type AgentModalTarget } from "./components/Sidebar";
 import { TerminalPane } from "./components/TerminalPane";
 import { TodoDetailPane } from "./components/TodoDetailPane";
 import { Toasts } from "./components/Toasts";
@@ -58,6 +59,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [closeWarnOpen, setCloseWarnOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Lifted from Sidebar (#13): the command palette's "Nieuwe agent starten"
+  // action needs to open this modal too, not just the Sidebar's row button.
+  const [agentModal, setAgentModal] = useState<AgentModalTarget | null>(null);
 
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
   const setSidebarWidth = useLayoutStore((s) => s.setSidebarWidth);
@@ -70,6 +74,23 @@ export default function App() {
 
   const paletteActions = createCommandPaletteActions({
     openSettings: () => setSettingsOpen(true),
+    onNewAgentProject: (choice) => {
+      if ("projectId" in choice) {
+        setAgentModal({ projectId: choice.projectId });
+        return;
+      }
+      // Not open yet (picked from the workspace fallback): open it first,
+      // then scope the modal to whatever project that path resolved to.
+      void useProjectStore
+        .getState()
+        .openProject(choice.path)
+        .then(() => {
+          const opened = useProjectStore
+            .getState()
+            .projects.find((p) => p.root === choice.path);
+          if (opened) setAgentModal({ projectId: opened.id });
+        });
+    },
   });
 
   // Initial state pull + lifecycle-event subscriptions. Startup restores the
@@ -251,7 +272,7 @@ export default function App() {
       </header>
 
       <div className={styles.body}>
-        <Sidebar />
+        <Sidebar onOpenNewAgentModal={(target) => setAgentModal(target)} />
         <div
           className={styles.sidebarResizer}
           onMouseDown={onSidebarResizerDown}
@@ -288,6 +309,13 @@ export default function App() {
       <CloseWarningModal
         open={closeWarnOpen}
         onClose={() => setCloseWarnOpen(false)}
+      />
+      <NewAgentModal
+        open={agentModal !== null}
+        projectId={agentModal?.projectId ?? null}
+        todoIds={agentModal?.todoIds}
+        initialName={agentModal?.initialName}
+        onClose={() => setAgentModal(null)}
       />
       <CommandPalette
         open={paletteOpen}
