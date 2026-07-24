@@ -42,6 +42,20 @@ describe("CommandPalette", () => {
 
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("focuses the search input when opening from a closed state", () => {
+    // Mounting directly with open=true (the other tests' pattern) starts
+    // usePresence's `mounted` state already true, masking this: the real
+    // App.tsx usage keeps CommandPalette mounted and flips `open` false→true,
+    // where `mounted` only catches up a render later.
+    const { rerender } = render(
+      <CommandPalette open={false} onClose={() => undefined} />,
+    );
+
+    rerender(<CommandPalette open onClose={() => undefined} />);
+
+    expect(screen.getByPlaceholderText("Type a command…")).toHaveFocus();
+  });
 });
 
 describe("CommandPalette — actions", () => {

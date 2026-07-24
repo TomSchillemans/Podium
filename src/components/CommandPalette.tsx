@@ -129,8 +129,12 @@ export function CommandPalette({
   }, [open, closePalette, leaveThemePreview, pageStack]);
 
   useEffect(() => {
-    if (open) inputRef.current?.focus({ preventScroll: true });
-  }, [open]);
+    // `mounted` lags `open` by one render (see `usePresence`): the first
+    // render after `open` flips true still returns null (ref not attached
+    // yet), so this must also re-run once `mounted` catches up — depending
+    // on `open` alone leaves the input reachable only by clicking it.
+    if (open && mounted) inputRef.current?.focus({ preventScroll: true });
+  }, [open, mounted]);
 
   if (!mounted) return null;
 
