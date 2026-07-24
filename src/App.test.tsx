@@ -16,7 +16,7 @@ const fixtures = vi.hoisted(() => ({
 }));
 
 const defaultInvokeImpl = vi.hoisted(
-  () => (cmd: string, args?: Record<string, unknown>) => {
+  () => (cmd: string, args?: InvokeArgs) => {
     switch (cmd) {
       case "adapters_list":
         return Promise.resolve([
@@ -67,7 +67,7 @@ vi.mock("./lib/terminalRegistry", () => ({
   applyFontSizeToTerminals: vi.fn(),
 }));
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { useProcessStore } from "./state/processStore";
 import App from "./App";
 
