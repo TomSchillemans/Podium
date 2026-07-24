@@ -434,3 +434,60 @@ describe("CommandPalette — new agent project sub-list", () => {
     });
   });
 });
+
+describe("CommandPalette — Project openen", () => {
+  const initialProject = useProjectStore.getState();
+
+  afterEach(() => {
+    useProjectStore.setState(initialProject, true);
+  });
+
+  function project(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
+    return {
+      id: "proj-1",
+      name: "Webshop",
+      root: "/fake/webshop",
+      iconInitials: "WS",
+      configError: null,
+      renamed: false,
+      ...overrides,
+    };
+  }
+
+  function renderWithOpenProjectAction() {
+    const actions = createCommandPaletteActions({
+      openSettings: () => undefined,
+    });
+    render(<CommandPalette open onClose={() => undefined} actions={actions} />);
+  }
+
+  function openProjectSubList() {
+    fireEvent.click(screen.getByText("Project openen"));
+  }
+
+  it('selecting "Project openen" shows all workspace projects plus an "Add project…" item', () => {
+    useProjectStore.setState({
+      projects: [
+        project({ id: "proj-1", name: "Webshop" }),
+        project({ id: "proj-2", name: "Blog", root: "/fake/blog" }),
+      ],
+    });
+    renderWithOpenProjectAction();
+
+    openProjectSubList();
+
+    expect(screen.getByText("Webshop")).toBeInTheDocument();
+    expect(screen.getByText("Blog")).toBeInTheDocument();
+    expect(screen.getByText("Add project…")).toBeInTheDocument();
+  });
+
+  it('the "Add project…" item is always present even with an empty workspace', () => {
+    useProjectStore.setState({ projects: [] });
+    renderWithOpenProjectAction();
+
+    openProjectSubList();
+
+    expect(screen.getByText("Add project…")).toBeInTheDocument();
+    expect(screen.queryByText("Webshop")).not.toBeInTheDocument();
+  });
+});

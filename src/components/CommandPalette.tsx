@@ -3,10 +3,12 @@
 import { Command } from "cmdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { ProjectInfo } from "../ipc/types";
 import type { CommandPaletteAction } from "../lib/commandPaletteActions";
 import { orderByHistory } from "../lib/commandPaletteActions";
 import { MOTION, usePresence } from "../lib/motion";
 import { useCommandPaletteHistoryStore } from "../state/commandPaletteHistoryStore";
+import { useProjectStore } from "../state/projectStore";
 import { applyTheme, useThemeStore, type ThemeMode } from "../state/themeStore";
 import styles from "./CommandPalette.module.css";
 
@@ -26,6 +28,22 @@ interface Page {
 // theme preview on highlight, committed on Enter and reverted on Escape.
 const THEME_PAGE_ID = "theme";
 
+// The "Project openen" action's id — its sub-list isn't the static `items`
+// on the action (always `[]`, see `commandPaletteActions.ts`); it's built
+// live from the workspace here so it always reflects the current project
+// list, plus a trailing "Add project…" item.
+const OPEN_PROJECT_PAGE_ID = "open-project";
+
+function buildOpenProjectPage(projects: ProjectInfo[]): CommandPaletteAction[] {
+  return [
+    ...projects.map((project) => ({
+      id: project.id,
+      label: project.name,
+    })),
+    { id: "add-project", label: "Add project…" },
+  ];
+}
+
 export function CommandPalette({
   open,
   onClose,
@@ -35,15 +53,19 @@ export function CommandPalette({
   // Keep the dialog mounted while it animates closed (see `usePresence`).
   const { mounted, state } = usePresence(open, MOTION.base);
   const history = useCommandPaletteHistoryStore((s) => s.entries);
+  const projects = useProjectStore((s) => s.projects);
 
   // A breadcrumb stack of sub-lists pushed by selecting an action with
   // `items` (cmdk's "pages" pattern); empty means the root list is showing.
   const [pageStack, setPageStack] = useState<Page[]>([]);
   const currentPage = pageStack[pageStack.length - 1];
   // Only the root list is reordered by recency — a pushed sub-list keeps its
-  // declared order.
+  // declared order. The "Project openen" page is the one exception: its
+  // items come from live workspace state, not the page's declared `items`.
   const currentActions = currentPage
-    ? currentPage.items
+    ? currentPage.id === OPEN_PROJECT_PAGE_ID
+      ? buildOpenProjectPage(projects)
+      : currentPage.items
     : orderByHistory(actions, history);
 
   // The highlighted cmdk item's value, controlled so we get notified of

@@ -139,6 +139,14 @@ export function createCommandPaletteActions(
     { id: "settings", label: "Instellingen", handler: handlers.openSettings },
     newTerminalAction(handlers),
     {
+      id: "open-project",
+      label: "Project openen",
+      // The sub-list is data-driven (live workspace projects, plus "Add
+      // project…"), so `items` here is just the "has a sub-list" marker —
+      // CommandPalette.tsx builds the real list from the project store.
+      items: [],
+    },
+    {
       id: "theme",
       label: "Thema wisselen",
       items: (["light", "dark", "retro"] as ThemeMode[]).map((mode) => ({

@@ -23,6 +23,17 @@ describe("createCommandPaletteActions", () => {
     expect(openSettings).toHaveBeenCalledOnce();
   });
 
+  it('includes a "Project openen" root action that opens a sub-list', () => {
+    const actions = createCommandPaletteActions({
+      openSettings: () => undefined,
+    });
+
+    const openProject = actions.find((a) => a.id === "open-project");
+
+    expect(openProject?.label).toBe("Project openen");
+    expect(openProject?.items).toEqual([]);
+  });
+
   it('includes a "Thema wisselen" root action with 3 sub-items (Licht/Donker/Retro)', () => {
     const actions = createCommandPaletteActions({
       openSettings: () => undefined,
