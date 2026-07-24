@@ -146,7 +146,14 @@ export function CommandPalette({
     // revert the theme it just applied.
     themeOnEnterRef.current = null;
     action.handler?.();
-    useCommandPaletteHistoryStore.getState().recordUsed(action.id);
+    // Record against the root action's id (recognised by orderByHistory's
+    // root-level reorder), not the leaf's own id — a leaf inside a pushed
+    // sub-list (a project id, a theme name, ...) never matches a root action.
+    if (currentPage) {
+      useCommandPaletteHistoryStore.getState().recordUsed(currentPage.id, action.id);
+    } else {
+      useCommandPaletteHistoryStore.getState().recordUsed(action.id);
+    }
     closePalette();
   }
 

@@ -136,6 +136,48 @@ describe("CommandPalette — history", () => {
     expect(options[0]).toHaveTextContent("Alpha");
     expect(options[1]).toHaveTextContent("Beta");
   });
+
+  it("selecting a leaf inside a sub-list records the root action's id, not the leaf's", () => {
+    const actions = [
+      { id: "a", label: "Alpha", handler: () => undefined },
+      {
+        id: "b",
+        label: "Beta",
+        items: [{ id: "b-leaf", label: "Beta Leaf", handler: () => undefined }],
+      },
+    ];
+    render(<CommandPalette open onClose={() => undefined} actions={actions} />);
+
+    fireEvent.click(screen.getByText("Beta"));
+    fireEvent.click(screen.getByText("Beta Leaf"));
+
+    expect(useCommandPaletteHistoryStore.getState().entries).toEqual([
+      { actionId: "b", subChoiceId: "b-leaf" },
+    ]);
+  });
+
+  it("re-opening after selecting a leaf inside a sub-list shows the root action first", () => {
+    const actions = [
+      { id: "a", label: "Alpha", handler: () => undefined },
+      {
+        id: "b",
+        label: "Beta",
+        items: [{ id: "b-leaf", label: "Beta Leaf", handler: () => undefined }],
+      },
+    ];
+    const { rerender } = render(
+      <CommandPalette open onClose={() => undefined} actions={actions} />,
+    );
+    fireEvent.click(screen.getByText("Beta"));
+    fireEvent.click(screen.getByText("Beta Leaf"));
+
+    // A real re-open unmounts (usePresence) and mounts fresh; simulate that.
+    rerender(<CommandPalette open={false} onClose={() => undefined} actions={actions} />);
+    rerender(<CommandPalette open onClose={() => undefined} actions={actions} />);
+
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveTextContent("Beta");
+  });
 });
 
 describe("CommandPalette — new terminal project sub-list", () => {
