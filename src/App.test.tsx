@@ -1,10 +1,4 @@
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // App wires up IPC on mount; jsdom has no Tauri bridge, so stub it out.
@@ -12,14 +6,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // `workspace_list` — return arrays) and `listen` resolves a no-op unlisten.
 // `project_list` and `recents_list` read from these fixtures so individual
 // tests can seed "already open" vs. "not yet open" projects; both default to
-// empty (the pre-existing empty-workspace behaviour).
+// empty (the pre-existing empty-workspace behaviour). Tests needing finer
+// control (e.g. asserting `process_add`/`process_start` calls) override with
+// `vi.mocked(invoke).mockImplementation(...)` and reset back to
+// `defaultInvokeImpl` in their own `afterEach`.
 const fixtures = vi.hoisted(() => ({
   projectList: [] as unknown[],
   recentsList: [] as unknown[],
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn((cmd: string, args?: Record<string, unknown>) => {
+const defaultInvokeImpl = vi.hoisted(
+  () => (cmd: string, args?: Record<string, unknown>) => {
     switch (cmd) {
       case "adapters_list":
         return Promise.resolve([
@@ -43,7 +40,11 @@ vi.mock("@tauri-apps/api/core", () => ({
       default:
         return Promise.resolve([]);
     }
-  }),
+  },
+);
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(defaultInvokeImpl),
   Channel: class {
     onmessage: (message: unknown) => void = () => undefined;
   },
@@ -54,7 +55,19 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(() => Promise.resolve(null)),
 }));
+// A focused terminal process mounts a real xterm.js instance, which jsdom
+// can't back (no canvas/matchMedia) — stub the registry so focusing one
+// (see "App — command palette new terminal" below) doesn't crash the tree.
+vi.mock("./lib/terminalRegistry", () => ({
+  acquireTerminal: vi.fn(() => ({ scrollToBottom: vi.fn(), focus: vi.fn() })),
+  attachToElement: vi.fn(),
+  fitTerminal: vi.fn(),
+  disposeTerminal: vi.fn(),
+  applyThemeToTerminals: vi.fn(),
+  applyFontSizeToTerminals: vi.fn(),
+}));
 
+import { invoke } from "@tauri-apps/api/core";
 import { useProcessStore } from "./state/processStore";
 import App from "./App";
 
@@ -230,6 +243,139 @@ describe("App — command palette new agent dispatch", () => {
     expect(spawnAgent).toHaveBeenCalledWith(
       "opened-/fake/newproj",
       expect.objectContaining({ adapterId: "claude-code" }),
+    );
+  });
+});
+
+describe("App — command palette new terminal", () => {
+  afterEach(() => {
+    vi.mocked(invoke).mockImplementation(defaultInvokeImpl);
+  });
+
+  it('choosing an open project calls addProcess with kind "terminal" and then startProcess', async () => {
+    const project = {
+      id: "p1",
+      name: "Project One",
+      root: "/tmp/project-one",
+      iconInitials: "PO",
+      configError: null,
+      renamed: false,
+    };
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      switch (cmd) {
+        case "project_list":
+          return Promise.resolve([project]);
+        case "adapters_list":
+          return Promise.resolve([
+            { id: "claude-code", displayName: "Claude Code", available: true },
+          ]);
+        case "process_add":
+          return Promise.resolve({
+            id: "proc1",
+            projectId: "p1",
+            name: "Terminal 1",
+            kind: { kind: "terminal" },
+            status: { state: "notStarted" },
+            restartPolicy: "never",
+            command: "",
+          });
+        case "process_start":
+          return Promise.resolve(null);
+        default:
+          return Promise.resolve([]);
+      }
+    });
+
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByText("Project One")).toBeInTheDocument(),
+    );
+
+    fireEvent.keyDown(window, { key: "P", metaKey: true, shiftKey: true });
+    const dialog = screen.getByRole("dialog", { name: "Command Palette" });
+    fireEvent.click(
+      within(dialog).getByText("Nieuw terminal/process starten"),
+    );
+    fireEvent.click(within(dialog).getByText("Project One"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("process_add", {
+        projectId: "p1",
+        spec: expect.objectContaining({ kind: "terminal" }),
+      }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("process_start", {
+        processId: "proc1",
+      }),
+    );
+  });
+
+  it("choosing a project that is not yet open first opens it, then creates the terminal", async () => {
+    const openedProject = {
+      id: "p2",
+      name: "New Project",
+      root: "/tmp/new-project",
+      iconInitials: "NP",
+      configError: null,
+      renamed: false,
+    };
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      switch (cmd) {
+        case "recents_list":
+          return Promise.resolve([
+            { path: "/tmp/new-project", name: "New Project", lastOpenedAt: 1 },
+          ]);
+        case "adapters_list":
+          return Promise.resolve([
+            { id: "claude-code", displayName: "Claude Code", available: true },
+          ]);
+        case "project_open":
+          return Promise.resolve(openedProject);
+        case "process_add":
+          return Promise.resolve({
+            id: "proc1",
+            projectId: "p2",
+            name: "Terminal 1",
+            kind: { kind: "terminal" },
+            status: { state: "notStarted" },
+            restartPolicy: "never",
+            command: "",
+          });
+        case "process_start":
+          return Promise.resolve(null);
+        default:
+          return Promise.resolve([]);
+      }
+    });
+
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByText("New Project")).toBeInTheDocument(),
+    );
+
+    fireEvent.keyDown(window, { key: "P", metaKey: true, shiftKey: true });
+    const dialog = screen.getByRole("dialog", { name: "Command Palette" });
+    fireEvent.click(
+      within(dialog).getByText("Nieuw terminal/process starten"),
+    );
+    fireEvent.click(within(dialog).getByText("New Project"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("project_open", {
+        path: "/tmp/new-project",
+      }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("process_add", {
+        projectId: "p2",
+        spec: expect.objectContaining({ kind: "terminal" }),
+      }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("process_start", {
+        processId: "proc1",
+      }),
     );
   });
 });

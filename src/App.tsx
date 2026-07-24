@@ -72,6 +72,38 @@ export default function App() {
     (s) => s.processes.find((p) => p.id === s.activeProcessId) ?? null,
   );
 
+  const projects = useProjectStore((s) => s.projects);
+  const recents = useProjectStore((s) => s.recents);
+
+  // Mirrors Sidebar.tsx's `addTerminal`: name by the project's existing
+  // terminal count, honour the terminal shell override, then start it.
+  const addTerminalToProject = useCallback(async (projectId: string) => {
+    const shell = useSettingsStore.getState().terminal.shell.trim();
+    const terminalCount = useProcessStore
+      .getState()
+      .processes.filter(
+        (p) => p.projectId === projectId && p.kind.kind === "terminal",
+      ).length;
+    const info = await useProcessStore.getState().addProcess(projectId, {
+      name: `Terminal ${terminalCount + 1}`,
+      kind: "terminal",
+      ...(shell ? { command: shell } : {}),
+    });
+    if (info) await useProcessStore.getState().startProcess(info.id);
+  }, []);
+
+  const openWorkspaceProjectAndAddTerminal = useCallback(
+    async (path: string) => {
+      await useProjectStore.getState().openProject(path);
+      const project = useProjectStore
+        .getState()
+        .projects.find((p) => p.root === path);
+      if (!project) return;
+      await addTerminalToProject(project.id);
+    },
+    [addTerminalToProject],
+  );
+
   const paletteActions = createCommandPaletteActions({
     openSettings: () => setSettingsOpen(true),
     onNewAgentProject: (choice) => {
@@ -91,6 +123,11 @@ export default function App() {
           if (opened) setAgentModal({ projectId: opened.id });
         });
     },
+    openProjects: projects.map((p) => ({ id: p.id, label: p.name })),
+    workspaceProjects: recents.map((r) => ({ id: r.path, label: r.name })),
+    onNewTerminalInProject: (id) => void addTerminalToProject(id),
+    onNewTerminalInWorkspaceProject: (path) =>
+      void openWorkspaceProjectAndAddTerminal(path),
   });
 
   // Initial state pull + lifecycle-event subscriptions. Startup restores the
