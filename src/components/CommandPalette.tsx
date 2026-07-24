@@ -4,7 +4,9 @@ import { Command } from "cmdk";
 import { useEffect, useRef } from "react";
 
 import type { CommandPaletteAction } from "../lib/commandPaletteActions";
+import { orderByHistory } from "../lib/commandPaletteActions";
 import { MOTION, usePresence } from "../lib/motion";
+import { useCommandPaletteHistoryStore } from "../state/commandPaletteHistoryStore";
 import styles from "./CommandPalette.module.css";
 
 export interface CommandPaletteProps {
@@ -21,6 +23,7 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   // Keep the dialog mounted while it animates closed (see `usePresence`).
   const { mounted, state } = usePresence(open, MOTION.base);
+  const history = useCommandPaletteHistoryStore((s) => s.entries);
 
   useEffect(() => {
     if (!open) return;
@@ -39,8 +42,11 @@ export function CommandPalette({
 
   function runAction(action: CommandPaletteAction) {
     action.handler();
+    useCommandPaletteHistoryStore.getState().recordUsed(action.id);
     onClose();
   }
+
+  const orderedActions = orderByHistory(actions, history);
 
   return (
     <div
@@ -68,7 +74,7 @@ export function CommandPalette({
             <Command.Empty className={styles.empty}>
               No matching commands.
             </Command.Empty>
-            {actions.map((action) => (
+            {orderedActions.map((action) => (
               <Command.Item
                 key={action.id}
                 value={action.label}
