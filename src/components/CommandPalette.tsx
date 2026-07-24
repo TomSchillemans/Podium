@@ -7,6 +7,7 @@ import type { CommandPaletteAction } from "../lib/commandPaletteActions";
 import { orderByHistory } from "../lib/commandPaletteActions";
 import { MOTION, usePresence } from "../lib/motion";
 import { useCommandPaletteHistoryStore } from "../state/commandPaletteHistoryStore";
+import { applyTheme, useThemeStore, type ThemeMode } from "../state/themeStore";
 import styles from "./CommandPalette.module.css";
 
 export interface CommandPaletteProps {
@@ -14,6 +15,16 @@ export interface CommandPaletteProps {
   onClose: () => void;
   actions?: CommandPaletteAction[];
 }
+
+/** A pushed sub-list, remembering which action opened it (see `THEME_PAGE_ID`). */
+interface Page {
+  id: string;
+  items: CommandPaletteAction[];
+}
+
+// The "Thema wisselen" action's id — the one page that gets a live DOM-only
+// theme preview on highlight, committed on Enter and reverted on Escape.
+const THEME_PAGE_ID = "theme";
 
 export function CommandPalette({
   open,
@@ -27,13 +38,20 @@ export function CommandPalette({
 
   // A breadcrumb stack of sub-lists pushed by selecting an action with
   // `items` (cmdk's "pages" pattern); empty means the root list is showing.
-  const [pageStack, setPageStack] = useState<CommandPaletteAction[][]>([]);
+  const [pageStack, setPageStack] = useState<Page[]>([]);
+  const currentPage = pageStack[pageStack.length - 1];
   // Only the root list is reordered by recency — a pushed sub-list keeps its
   // declared order.
-  const currentActions =
-    pageStack.length > 0
-      ? pageStack[pageStack.length - 1]
-      : orderByHistory(actions, history);
+  const currentActions = currentPage
+    ? currentPage.items
+    : orderByHistory(actions, history);
+
+  // The highlighted cmdk item's value, controlled so we get notified of
+  // arrow-key/pointer highlight changes (see `onHighlightChange`).
+  const [highlighted, setHighlighted] = useState("");
+  // The theme active when the "Thema wisselen" sub-list was entered, so
+  // Escape-without-Enter can restore it.
+  const themeOnEnterRef = useRef<ThemeMode | null>(null);
 
   useEffect(() => {
     if (open) return;
@@ -41,10 +59,18 @@ export function CommandPalette({
   }, [open]);
 
   useEffect(() => {
+    setHighlighted("");
+  }, [pageStack]);
+
+  useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       if (pageStack.length > 0) {
+        const top = pageStack[pageStack.length - 1];
+        if (top.id === THEME_PAGE_ID && themeOnEnterRef.current) {
+          applyTheme(themeOnEnterRef.current);
+        }
         setPageStack((prev) => prev.slice(0, -1));
       } else {
         onClose();
@@ -62,12 +88,25 @@ export function CommandPalette({
 
   function runAction(action: CommandPaletteAction) {
     if (action.items) {
-      setPageStack((prev) => [...prev, action.items!]);
+      if (action.id === THEME_PAGE_ID) {
+        themeOnEnterRef.current = useThemeStore.getState().mode;
+      }
+      setPageStack((prev) => [...prev, { id: action.id, items: action.items! }]);
       return;
     }
     action.handler?.();
     useCommandPaletteHistoryStore.getState().recordUsed(action.id);
     onClose();
+  }
+
+  // Controlled highlight (see cmdk's pages example): lets us preview the
+  // "Thema wisselen" sub-list's highlighted theme via the DOM-only
+  // `applyTheme`, without ever touching the store.
+  function onHighlightChange(value: string) {
+    setHighlighted(value);
+    if (currentPage?.id !== THEME_PAGE_ID) return;
+    const candidate = currentPage.items.find((item) => item.label === value);
+    if (candidate) applyTheme(candidate.id as ThemeMode);
   }
 
   return (
@@ -86,7 +125,12 @@ export function CommandPalette({
         aria-modal="true"
         aria-label="Command Palette"
       >
-        <Command className={styles.command} label="Command Palette">
+        <Command
+          className={styles.command}
+          label="Command Palette"
+          value={highlighted}
+          onValueChange={onHighlightChange}
+        >
           <Command.Input
             ref={inputRef}
             className={styles.input}

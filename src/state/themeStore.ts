@@ -19,7 +19,7 @@ function initialTheme(): ThemeMode {
   return "dark";
 }
 
-function applyTheme(mode: ThemeMode): void {
+export function applyTheme(mode: ThemeMode): void {
   document.documentElement.setAttribute("data-theme", mode);
 }
 

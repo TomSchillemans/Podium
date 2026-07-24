@@ -1,8 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCommandPaletteActions } from "../lib/commandPaletteActions";
 import { useCommandPaletteHistoryStore } from "../state/commandPaletteHistoryStore";
+import { useThemeStore } from "../state/themeStore";
 import { CommandPalette } from "./CommandPalette";
 
 describe("CommandPalette", () => {
@@ -169,5 +170,75 @@ describe("CommandPalette — nested pages", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("CommandPalette — theme preview", () => {
+  // Zustand's `set` shallow-merges into a new state object on every update,
+  // so a spy installed on `getState().setTheme` gets copied into every
+  // later state object too — `vi.restoreAllMocks()` alone can't undo that.
+  // Keep the pristine closure around and put it back after each test.
+  const realSetTheme = useThemeStore.getState().setTheme;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useThemeStore.setState({ setTheme: realSetTheme });
+    realSetTheme("dark");
+  });
+
+  function renderThemeActions() {
+    const onClose = vi.fn();
+    const actions = createCommandPaletteActions({
+      openSettings: () => undefined,
+    });
+    render(<CommandPalette open onClose={onClose} actions={actions} />);
+    return { onClose };
+  }
+
+  function openThemeSubList() {
+    fireEvent.click(screen.getByText("Thema wisselen"));
+    fireEvent.keyDown(screen.getByPlaceholderText("Type a command…"), {
+      key: "ArrowDown",
+    });
+  }
+
+  it("highlighting a theme option calls the DOM-only applyTheme preview, not themeStore.setTheme", () => {
+    useThemeStore.getState().setTheme("dark");
+    renderThemeActions();
+
+    openThemeSubList();
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe(
+      "light",
+    );
+    expect(useThemeStore.getState().mode).toBe("dark");
+  });
+
+  it("pressing Enter on a highlighted theme calls themeStore.setTheme(candidate) exactly once, commits it, and closes the palette", () => {
+    useThemeStore.getState().setTheme("dark");
+    const setTheme = vi.spyOn(useThemeStore.getState(), "setTheme");
+    const { onClose } = renderThemeActions();
+
+    openThemeSubList();
+    fireEvent.keyDown(screen.getByPlaceholderText("Type a command…"), {
+      key: "Enter",
+    });
+
+    expect(setTheme).toHaveBeenCalledExactlyOnceWith("light");
+    expect(useThemeStore.getState().mode).toBe("light");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("pressing Escape without Enter calls applyTheme(original) to restore the DOM, without ever having called themeStore.setTheme", () => {
+    useThemeStore.getState().setTheme("dark");
+    const setTheme = vi.spyOn(useThemeStore.getState(), "setTheme");
+    renderThemeActions();
+
+    openThemeSubList();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(setTheme).not.toHaveBeenCalled();
+    expect(screen.getByText("Thema wisselen")).toBeInTheDocument();
   });
 });
