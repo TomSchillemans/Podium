@@ -490,4 +490,29 @@ describe("CommandPalette — Project openen", () => {
     expect(screen.getByText("Add project…")).toBeInTheDocument();
     expect(screen.queryByText("Webshop")).not.toBeInTheDocument();
   });
+
+  it("choosing a workspace project calls projectStore.openProject with its path", () => {
+    const openProject = vi.fn();
+    useProjectStore.setState({
+      projects: [project({ id: "proj-1", name: "Webshop", root: "/fake/webshop" })],
+      openProject,
+    });
+    renderWithOpenProjectAction();
+    openProjectSubList();
+
+    fireEvent.click(screen.getByText("Webshop"));
+
+    expect(openProject).toHaveBeenCalledExactlyOnceWith("/fake/webshop");
+  });
+
+  it('choosing "Add project…" calls projectStore.openProjectDialog()', () => {
+    const openProjectDialog = vi.fn();
+    useProjectStore.setState({ projects: [], openProjectDialog });
+    renderWithOpenProjectAction();
+    openProjectSubList();
+
+    fireEvent.click(screen.getByText("Add project…"));
+
+    expect(openProjectDialog).toHaveBeenCalledOnce();
+  });
 });

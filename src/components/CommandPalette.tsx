@@ -39,8 +39,13 @@ function buildOpenProjectPage(projects: ProjectInfo[]): CommandPaletteAction[] {
     ...projects.map((project) => ({
       id: project.id,
       label: project.name,
+      handler: () => void useProjectStore.getState().openProject(project.root),
     })),
-    { id: "add-project", label: "Add project…" },
+    {
+      id: "add-project",
+      label: "Add project…",
+      handler: () => void useProjectStore.getState().openProjectDialog(),
+    },
   ];
 }
 
