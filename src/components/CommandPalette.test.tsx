@@ -241,4 +241,61 @@ describe("CommandPalette — theme preview", () => {
     expect(setTheme).not.toHaveBeenCalled();
     expect(screen.getByText("Thema wisselen")).toBeInTheDocument();
   });
+
+  it("dismissing via an overlay mousedown (not Escape) while previewing also reverts the DOM to the original theme, without ever calling themeStore.setTheme", () => {
+    useThemeStore.getState().setTheme("dark");
+    const setTheme = vi.spyOn(useThemeStore.getState(), "setTheme");
+    const onClose = vi.fn();
+    const actions = createCommandPaletteActions({
+      openSettings: () => undefined,
+    });
+    const { container } = render(
+      <CommandPalette open onClose={onClose} actions={actions} />,
+    );
+
+    openThemeSubList();
+    const overlay = container.querySelector('[role="presentation"]');
+    if (!overlay) throw new Error("overlay element not found");
+    fireEvent.mouseDown(overlay);
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(setTheme).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("committing a theme via Enter clears the preview-revert state first, so it is never undone by the close that follows", () => {
+    useThemeStore.getState().setTheme("dark");
+    renderThemeActions();
+
+    openThemeSubList();
+    fireEvent.keyDown(screen.getByPlaceholderText("Type a command…"), {
+      key: "Enter",
+    });
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    expect(useThemeStore.getState().mode).toBe("light");
+  });
+
+  it("the palette closing via any other `open` flip (not Escape, not the overlay) also reverts an uncommitted theme preview", () => {
+    useThemeStore.getState().setTheme("dark");
+    const setTheme = vi.spyOn(useThemeStore.getState(), "setTheme");
+    const actions = createCommandPaletteActions({
+      openSettings: () => undefined,
+    });
+    const { rerender } = render(
+      <CommandPalette open onClose={() => undefined} actions={actions} />,
+    );
+
+    openThemeSubList();
+    rerender(
+      <CommandPalette
+        open={false}
+        onClose={() => undefined}
+        actions={actions}
+      />,
+    );
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(setTheme).not.toHaveBeenCalled();
+  });
 });

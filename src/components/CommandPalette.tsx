@@ -1,7 +1,7 @@
 /** The command palette: a searchable list of app-wide actions (Cmd/Ctrl+Shift+P). */
 
 import { Command } from "cmdk";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { CommandPaletteAction } from "../lib/commandPaletteActions";
 import { orderByHistory } from "../lib/commandPaletteActions";
@@ -50,13 +50,37 @@ export function CommandPalette({
   // arrow-key/pointer highlight changes (see `onHighlightChange`).
   const [highlighted, setHighlighted] = useState("");
   // The theme active when the "Thema wisselen" sub-list was entered, so
-  // Escape-without-Enter can restore it.
+  // leaving without confirming (Escape, or dismissing the palette any other
+  // way) can restore it. Non-null exactly while an uncommitted preview is
+  // live; `leaveThemePreview` is the single idempotent place that clears it.
   const themeOnEnterRef = useRef<ThemeMode | null>(null);
+
+  // Reverts any live DOM-only theme preview back to the theme active when
+  // the "Thema wisselen" sub-list was entered. Idempotent — safe to call
+  // from every exit path (Escape, overlay dismiss, future close paths) and
+  // a no-op once a commit (Enter) or an earlier call has cleared the ref.
+  const leaveThemePreview = useCallback(() => {
+    const previous = themeOnEnterRef.current;
+    themeOnEnterRef.current = null;
+    if (previous !== null) applyTheme(previous);
+  }, []);
+
+  // The single path every "close the palette" trigger must go through, so
+  // an uncommitted theme preview is never left applied to the DOM.
+  const closePalette = useCallback(() => {
+    leaveThemePreview();
+    onClose();
+  }, [leaveThemePreview, onClose]);
 
   useEffect(() => {
     if (open) return;
+    // Backstop for `open` flipping to false through any path other than
+    // Escape or the overlay dismiss (both already route through
+    // `closePalette`/`leaveThemePreview` themselves) — e.g. a future
+    // programmatic close. Idempotent, so this is a no-op in those cases.
+    leaveThemePreview();
     setPageStack([]);
-  }, [open]);
+  }, [open, leaveThemePreview]);
 
   useEffect(() => {
     setHighlighted("");
@@ -67,18 +91,15 @@ export function CommandPalette({
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       if (pageStack.length > 0) {
-        const top = pageStack[pageStack.length - 1];
-        if (top.id === THEME_PAGE_ID && themeOnEnterRef.current) {
-          applyTheme(themeOnEnterRef.current);
-        }
+        leaveThemePreview();
         setPageStack((prev) => prev.slice(0, -1));
       } else {
-        onClose();
+        closePalette();
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose, pageStack]);
+  }, [open, closePalette, leaveThemePreview, pageStack]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus({ preventScroll: true });
@@ -94,9 +115,12 @@ export function CommandPalette({
       setPageStack((prev) => [...prev, { id: action.id, items: action.items! }]);
       return;
     }
+    // Clear first: this is a commit, so the close that follows must never
+    // revert the theme it just applied.
+    themeOnEnterRef.current = null;
     action.handler?.();
     useCommandPaletteHistoryStore.getState().recordUsed(action.id);
-    onClose();
+    closePalette();
   }
 
   // Controlled highlight (see cmdk's pages example): lets us preview the
@@ -115,7 +139,7 @@ export function CommandPalette({
       data-state={state}
       role="presentation"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) closePalette();
       }}
     >
       <div
